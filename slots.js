@@ -360,12 +360,13 @@ router.post("/book-slot", async (req, res) => {
         }
       }
 
+      const isUUID = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
       sessionToken = uuidv4();
       const { rows: sr } = await client.query(
         `INSERT INTO interview_sessions (agency_id, job_id, candidate_id, user_id, slot_id, candidate_name, email, job_role, jd_text, resume_text, session_token, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'scheduled')
          RETURNING id, session_token`,
-        [agencyId||null, jobId||null, actualCandidateId, userId||null, slot_id, name, email, finalJobRole, finalJD, finalResume, sessionToken]
+        [isUUID(agencyId)?agencyId:null, isUUID(jobId)?jobId:null, actualCandidateId, isUUID(userId)?userId:null, slot_id, name, email, finalJobRole, finalJD, finalResume, sessionToken]
       );
       sessionId = sr[0].id;
 
@@ -375,7 +376,7 @@ router.post("/book-slot", async (req, res) => {
         `INSERT INTO interviews (candidate_id, agency_id, scheduled_at, status, async_token, async_link)
          VALUES ($1, $2, $3, 'scheduled', $4, $5)
          ON CONFLICT (async_token) DO NOTHING`,
-        [actualCandidateId, agencyId||null, scheduledAt, sessionToken, asyncLink]
+        [actualCandidateId, isUUID(agencyId)?agencyId:null, scheduledAt, sessionToken, asyncLink]
       );
       console.log('✅ interviews row inserted for token:', sessionToken);
 
