@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schedule Your Interview</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #f0f4f9;
+    font-family: 'Google Sans', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    color: #202124;
+  }
+
+  .container {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+    width: 100%;
+    max-width: 860px;
+    overflow: hidden;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    background: #1a73e8;
+    color: #fff;
+    padding: 24px 32px;
+  }
+  .header .logo { font-size: 0.85rem; opacity: 0.85; margin-bottom: 4px; }
+  .header h1 { font-size: 1.4rem; font-weight: 500; }
+  .header .candidate-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    background: rgba(255,255,255,0.15);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+  }
+
+  /* ── BODY ── */
+  .body {
+    display: flex;
+    min-height: 480px;
+  }
+
+  /* ── LEFT: CALENDAR ── */
+  .cal-panel {
+    width: 320px;
+    flex-shrink: 0;
+    padding: 24px;
+    border-right: 1px solid #e8eaed;
+  }
+
+  .cal-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .cal-nav .month-label { font-size: 1rem; font-weight: 500; color: #202124; }
+  .cal-nav button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    font-size: 1.1rem;
+    color: #5f6368;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+  }
+  .cal-nav button:hover { background: #f1f3f4; }
+
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+  }
+  .cal-dow {
+    text-align: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #5f6368;
+    padding: 4px 0 8px;
+    text-transform: uppercase;
+  }
+  .cal-day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    border-radius: 50%;
+    cursor: pointer;
+    color: #202124;
+    transition: background 0.12s, color 0.12s;
+    position: relative;
+  }
+  .cal-day:hover:not(.empty):not(.past) { background: #e8f0fe; color: #1a73e8; }
+  .cal-day.has-slots::after {
+    content: '';
+    position: absolute;
+    bottom: 3px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #1a73e8;
+  }
+  .cal-day.selected { background: #1a73e8 !important; color: #fff !important; }
+  .cal-day.selected::after { background: #fff; }
+  .cal-day.today { font-weight: 700; color: #1a73e8; }
+  .cal-day.today.selected { color: #fff; }
+  .cal-day.past { color: #bdc1c6; cursor: default; }
+  .cal-day.empty { cursor: default; }
+
+  /* ── RIGHT: TIME SLOTS ── */
+  .time-panel {
+    flex: 1;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .time-panel .date-heading {
+    font-size: 1rem;
+    font-weight: 500;
+    color: #202124;
+    margin-bottom: 16px;
+    min-height: 24px;
+  }
+  .time-panel .date-heading span { color: #1a73e8; }
+
+  .time-slots {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    flex: 1;
+    align-content: start;
+    max-height: 340px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .time-slots::-webkit-scrollbar { width: 4px; }
+  .time-slots::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 4px; }
+
+  .time-btn {
+    padding: 10px 6px;
+    border: 1.5px solid #dadce0;
+    border-radius: 8px;
+    background: #fff;
+    color: #1a73e8;
+    font-size: 0.88rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.12s;
+  }
+  .time-btn:hover { border-color: #1a73e8; background: #e8f0fe; }
+  .time-btn.selected { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+
+  .no-slots-msg {
+    color: #5f6368;
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 40px 20px;
+  }
+  .pick-date-msg {
+    color: #9aa0a6;
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 40px 20px;
+  }
+
+  /* ── FOOTER ── */
+  .footer {
+    padding: 20px 32px;
+    border-top: 1px solid #e8eaed;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .selected-summary {
+    font-size: 0.88rem;
+    color: #5f6368;
+    min-height: 20px;
+  }
+  .selected-summary strong { color: #202124; }
+
+  .book-btn {
+    padding: 10px 28px;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+  .book-btn:hover:not(:disabled) { background: #1557b0; }
+  .book-btn:disabled { background: #dadce0; color: #9aa0a6; cursor: not-allowed; }
+
+  /* ── STATUS ── */
+  .status-bar {
+    margin: 0 32px 20px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    display: none;
+  }
+  .status-bar.success { background: #e6f4ea; color: #137333; display: block; }
+  .status-bar.error   { background: #fce8e6; color: #c5221f; display: block; }
+
+  /* ── MANUAL FIELDS (if no name/email in URL) ── */
+  .manual-fields {
+    padding: 16px 32px 0;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .manual-fields input {
+    flex: 1;
+    min-width: 180px;
+    padding: 10px 14px;
+    border: 1.5px solid #dadce0;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: #202124;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .manual-fields input:focus { border-color: #1a73e8; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="logo">Pontis AI Interviews</div>
+    <h1>Schedule Your Interview</h1>
+    <div class="candidate-badge" id="candidateBadge" style="display:none">
+      <span>👤</span>
+      <span id="badgeName"></span>
+      <span style="opacity:0.6">·</span>
+      <span id="badgeEmail" style="opacity:0.85"></span>
+    </div>
+  </div>
+
+  <!-- MANUAL FIELDS (shown only if name/email not in URL) -->
+  <div class="manual-fields" id="manualFields">
+    <input type="text"  id="nameInput"  placeholder="Your full name" />
+    <input type="email" id="emailInput" placeholder="Your email address" />
+  </div>
+
+  <!-- BODY -->
+  <div class="body">
+
+    <!-- CALENDAR -->
+    <div class="cal-panel">
+      <div class="cal-nav">
+        <button id="prevMonth">&#8249;</button>
+        <span class="month-label" id="monthLabel"></span>
+        <button id="nextMonth">&#8250;</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+
+    <!-- TIME SLOTS -->
+    <div class="time-panel">
+      <div class="date-heading" id="dateHeading">
+        <span style="color:#9aa0a6">← Select a date to see available times</span>
+      </div>
+      <div class="time-slots" id="timeSlots">
+        <div class="pick-date-msg" style="grid-column:1/-1">Pick a date on the calendar</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- STATUS -->
+  <div class="status-bar" id="statusBar"></div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div class="selected-summary" id="selectedSummary">No slot selected</div>
+    <button class="book-btn" id="bookBtn" disabled>Confirm Booking</button>
+  </div>
+
+</div>
+
+<script>
+const p = new URLSearchParams(window.location.search);
+const token = p.get("token");
+const cfg = {
+  name:          p.get("candidateName") || p.get("name")         || "",
+  email:         p.get("email")                                   || "",
+  resume:        p.get("resume")                                  || "",
+  jobDescription:p.get("jobDescription") || p.get("jd")          || "",
+  jobRole:       p.get("jobRole")                                 || "",
+  agencyId:      p.get("agencyId")       || p.get("agency_id")   || "",
+  userId:        p.get("userId")         || p.get("user_id")     || "",
+  jobId:         p.get("jobId")          || p.get("job_id")      || "",
+  candidateId:   p.get("candidateId")    || p.get("candidate_id")|| "",
+};
+
+function localDateStr(d) {
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+let slotsByDate  = {};
+let selectedDate = null;
+let selectedSlot = null;
+let viewYear     = new Date().getFullYear();
+let viewMonth    = new Date().getMonth();
+
+const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+
+async function init() {
+  if (token) {
+    try {
+      const res  = await fetch(`/api/booking-token/${encodeURIComponent(token)}`);
+      const data = await res.json();
+      if (data.success) {
+        cfg.name = data.name; cfg.email = data.email;
+        cfg.resume = data.resume_text; cfg.jobDescription = data.job_description;
+        cfg.jobRole = data.job_title; cfg.agencyId = data.agency_id;
+        cfg.candidateId = data.candidate_id; cfg.jobId = data.job_id;
+        cfg.userId = data.user_id;
+      } else { showStatus(data.error || "Invalid booking link", "error"); }
+    } catch(e) { showStatus("Failed to load booking details", "error"); }
+  }
+
+  if (cfg.name && cfg.email) {
+    document.getElementById("manualFields").style.display = "none";
+    document.getElementById("candidateBadge").style.display = "inline-flex";
+    document.getElementById("badgeName").textContent  = cfg.name;
+    document.getElementById("badgeEmail").textContent = cfg.email;
+  } else {
+    if (cfg.name)  document.getElementById("nameInput").value  = cfg.name;
+    if (cfg.email) document.getElementById("emailInput").value = cfg.email;
+  }
+
+  await loadSlots();
+}
+
+async function loadSlots() {
+  try {
+    const res  = await fetch("/api/available-slots");
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Failed to load slots");
+
+    slotsByDate = {};
+    for (const s of data.slots) {
+      if (!slotsByDate[s.slot_date]) slotsByDate[s.slot_date] = [];
+      slotsByDate[s.slot_date].push(s);
+    }
+    console.log("Slots loaded for dates:", Object.keys(slotsByDate));
+    renderCalendar();
+    const todayStr = localDateStr(new Date());
+    if (slotsByDate[todayStr]) selectDate(todayStr);
+  } catch (e) {
+    showStatus("Failed to load slots: " + e.message, "error");
+  }
+}
+
+function renderCalendar() {
+  document.getElementById("monthLabel").textContent = `${MONTHS[viewMonth]} ${viewYear}`;
+  const grid = document.getElementById("calGrid");
+  grid.innerHTML = "";
+
+  DAYS.forEach(d => {
+    const el = document.createElement("div");
+    el.className = "cal-dow";
+    el.textContent = d;
+    grid.appendChild(el);
+  });
+
+  const firstDay    = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const todayStr    = localDateStr(new Date());
+
+  for (let i = 0; i < firstDay; i++) {
+    const el = document.createElement("div");
+    el.className = "cal-day empty";
+    grid.appendChild(el);
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const mm      = String(viewMonth + 1).padStart(2, "0");
+    const dd      = String(d).padStart(2, "0");
+    const dateStr = `${viewYear}-${mm}-${dd}`;
+
+    const el       = document.createElement("div");
+    el.className   = "cal-day";
+    el.textContent = d;
+
+    const isPast   = dateStr < todayStr;
+    const isToday  = dateStr === todayStr;
+    const hasSlots = !!slotsByDate[dateStr];
+
+    if (isPast)               el.classList.add("past");
+    if (isToday)              el.classList.add("today");
+    if (hasSlots)             el.classList.add("has-slots");
+    if (dateStr === selectedDate) el.classList.add("selected");
+
+    if (!isPast && hasSlots) {
+      el.addEventListener("click", () => selectDate(dateStr));
+    }
+    grid.appendChild(el);
+  }
+}
+
+function selectDate(dateStr) {
+  selectedDate = dateStr;
+  selectedSlot = null;
+  document.getElementById("bookBtn").disabled = true;
+  updateSummary();
+  renderCalendar();
+  renderTimeSlots(dateStr);
+}
+
+function renderTimeSlots(dateStr) {
+  const slots     = slotsByDate[dateStr] || [];
+  const heading   = document.getElementById("dateHeading");
+  const container = document.getElementById("timeSlots");
+
+  const d = new Date(dateStr + "T00:00:00");
+  heading.innerHTML = `<span>${d.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</span>`;
+
+  if (!slots.length) {
+    container.innerHTML = '<div class="no-slots-msg" style="grid-column:1/-1">No available slots on this date</div>';
+    return;
+  }
+
+  container.innerHTML = "";
+  slots.forEach(slot => {
+    const btn       = document.createElement("button");
+    btn.className   = "time-btn";
+    btn.textContent = formatTime(slot.slot_time);
+    if (selectedSlot && selectedSlot.slot_id === slot.slot_id) btn.classList.add("selected");
+    btn.addEventListener("click", () => selectSlot(slot, btn));
+    container.appendChild(btn);
+  });
+}
+
+function selectSlot(slot, btnEl) {
+  selectedSlot = slot;
+  document.querySelectorAll(".time-btn").forEach(b => b.classList.remove("selected"));
+  btnEl.classList.add("selected");
+  document.getElementById("bookBtn").disabled = false;
+  updateSummary();
+}
+
+function updateSummary() {
+  const el = document.getElementById("selectedSummary");
+  if (selectedSlot) {
+    const d = new Date(selectedSlot.slot_date + "T00:00:00");
+    el.innerHTML = `<strong>${d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</strong> at <strong>${formatTime(selectedSlot.slot_time)}</strong>`;
+  } else {
+    el.textContent = "No slot selected";
+  }
+}
+
+document.getElementById("bookBtn").addEventListener("click", async () => {
+  const name  = cfg.name  || document.getElementById("nameInput")?.value.trim();
+  const email = cfg.email || document.getElementById("emailInput")?.value.trim();
+  if (!name || !email)  { showStatus("Please enter your name and email.", "error"); return; }
+  if (!selectedSlot)    { showStatus("Please select a time slot.", "error"); return; }
+
+  const btn = document.getElementById("bookBtn");
+  btn.disabled = true;
+  btn.textContent = "Booking...";
+
+  try {
+    const res  = await fetch("/api/book-slot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slot_id: selectedSlot.slot_id, name, email,
+        resume: cfg.resume, jobDescription: cfg.jobDescription,
+        jobRole: cfg.jobRole, agencyId: cfg.agencyId,
+        userId: cfg.userId, jobId: cfg.jobId, candidateId: cfg.candidateId,
+      }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showStatus(`✅ Interview booked for ${data.slot_date} at ${data.slot_time}. Check your email for confirmation.`, "success");
+      btn.textContent = "Booked ✓";
+    } else {
+      showStatus(data.error || "Booking failed", "error");
+      btn.disabled = false;
+      btn.textContent = "Confirm Booking";
+    }
+  } catch (e) {
+    showStatus("Network error. Please try again.", "error");
+    btn.disabled = false;
+    btn.textContent = "Confirm Booking";
+  }
+});
+
+document.getElementById("prevMonth").addEventListener("click", () => {
+  viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+  renderCalendar();
+});
+document.getElementById("nextMonth").addEventListener("click", () => {
+  viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+  renderCalendar();
+});
+
+function formatTime(t) {
+  const [h, m] = t.split(":");
+  const hour = parseInt(h);
+  return `${hour > 12 ? hour - 12 : hour || 12}:${m} ${hour >= 12 ? "PM" : "AM"}`;
+}
+
+function showStatus(msg, type) {
+  const el = document.getElementById("statusBar");
+  el.textContent = msg;
+  el.className   = "status-bar " + type;
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+node_modules/
+pontis-interview/node_modules/
+.env
+recordings/
+*.log
+public/interview/
