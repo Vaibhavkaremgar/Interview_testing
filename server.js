@@ -383,16 +383,38 @@ app.post("/api/save-recording", upload.single("recording"), async (req, res) => 
   const sizeBytes = fs.statSync(file.path).size;
   console.log(`📹 Recording saved: ${file.filename} (${(sizeBytes / 1024 / 1024).toFixed(2)} MB)`);
   if (sessionToken && DB_READY && pool) {
-    pool.query(
-      `UPDATE interview_sessions SET recording_path = $1, recording_size_bytes = $2 WHERE session_token = $3`,
-      [relativePath, sizeBytes, sessionToken]
-    ).catch(e => console.warn("Could not save recording path:", e.message));
+    try {
+      const fileBuffer = fs.readFileSync(file.path);
+      await pool.query(
+        `UPDATE interview_sessions SET recording_path = $1, recording_size_bytes = $2, recording_data = $3 WHERE session_token = $4`,
+        [relativePath, sizeBytes, fileBuffer, sessionToken]
+      );
+      console.log(`✅ Recording stored in DB: ${(sizeBytes/1024/1024).toFixed(2)} MB`);
+    } catch (e) {
+      console.warn("Could not save recording to DB:", e.message);
+    }
   }
   return res.json({ success: true, file: file.filename, size: sizeBytes });
 });
 
 // ── SERVE RECORDINGS ───────────────────────────────────────────
 app.use("/recordings", express.static(path.join(__dirname, "recordings")));
+
+app.get("/api/recording/:sessionToken", async (req, res) => {
+  if (!DB_READY || !pool) return res.status(503).json({ error: "DB not available" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT recording_data, recording_path FROM interview_sessions WHERE session_token = $1`,
+      [req.params.sessionToken]
+    );
+    if (!rows.length || !rows[0].recording_data) return res.status(404).json({ error: "Recording not found" });
+    res.setHeader("Content-Type", "video/webm");
+    res.setHeader("Content-Disposition", `inline; filename="${req.params.sessionToken}.webm"`);
+    res.send(rows[0].recording_data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ── HEALTH ────────────────────────────────────────────────────
 app.get("/", (req, res) => {
