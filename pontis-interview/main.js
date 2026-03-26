@@ -425,6 +425,7 @@ async function startInterview() {
       await audioCtx.resume();
       console.log("▶️ AudioContext resumed:", audioCtx.state);
     }
+    requestFullscreen();
     startRecording();
     updateDebug();
     const sessionToken = getParam("session");
@@ -512,4 +513,40 @@ async function startInterview() {
   }
 }
 
-startInterview();
+// startInterview() is called by consent screen button in index.html
+
+// ── TAB SWITCH PROCTORING ─────────────────────────────────────
+let tabSwitchCount = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden' || !vapi) return;
+  tabSwitchCount++;
+  console.warn('Tab switch #' + tabSwitchCount);
+  const msg = tabSwitchCount === 1
+    ? 'The candidate just switched tabs. Stop and warn them tab switching is not allowed and is being recorded.'
+    : 'The candidate has switched tabs ' + tabSwitchCount + ' times. Firmly warn them repeated switching may result in disqualification.';
+  vapi.send({ type: 'add-message', message: { role: 'system', content: msg } });
+  fetch(API_BASE + '/api/session-heartbeat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_token: getParam('session') || '', transcript_so_far: '[PROCTORING] Tab switch #' + tabSwitchCount + ' at ' + new Date().toISOString() }),
+  }).catch(() => {});
+});
+
+// ── FULLSCREEN ENFORCEMENT ────────────────────────────────────
+function requestFullscreen() {
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen();
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+}
+
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement || !vapi) return;
+  console.warn('Fullscreen exited');
+  vapi.send({ type: 'add-message', message: { role: 'system', content: 'The candidate has exited fullscreen mode. Stop and instruct them to return to fullscreen immediately to continue the interview.' } });
+});
+
+// ── CONSENT BUTTON ─────────────────────────────────────────
+document.getElementById('consentBtn').addEventListener('click', () => {
+  document.getElementById('consentScreen').style.display = 'none';
+  startInterview();
+});
