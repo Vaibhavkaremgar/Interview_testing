@@ -68,15 +68,9 @@ async function generateSlots() {
 async function deletePastSlots() {
   if (!DB_ENABLED || !pool) return;
   try {
-    const now         = new Date();
-    const todayStr    = localDateStr(now);
-    const currentTime = localTimeStr(now);
-
     const { rowCount } = await pool.query(
       `DELETE FROM interview_slots
-       WHERE slot_date < $1
-          OR (slot_date = $1 AND slot_time < $2)`,
-      [todayStr, currentTime]
+       WHERE (slot_date::text || ' ' || slot_time::text)::timestamp < NOW() AT TIME ZONE 'Asia/Kolkata'`
     );
     if (rowCount > 0) console.log(`🗑️  Deleted ${rowCount} past slot(s)`);
   } catch (e) {
@@ -226,16 +220,26 @@ router.get("/booking-token/:token", async (req, res) => {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT c.name, c.email, c.resume_text, jd.title, jd.description, bl.agency_id, bl.candidate_id, bl.job_id, bl.user_id
-       FROM booking_links bl
-       JOIN candidates c ON c.id = bl.candidate_id
-       JOIN job_descriptions jd ON jd.id = bl.job_id
-       WHERE bl.token = $1 AND bl.used = false AND bl.expires_at > NOW()`,
+      `SELECT payload, agency_id, candidate_id, job_id, user_id
+       FROM notification_workflow_tokens
+       WHERE token = $1 AND is_active = true AND expires_at > NOW()`,
       [token]
     );
     if (!rows.length) return res.status(404).json({ success: false, error: "Token invalid, expired, or already used" });
-    const d = rows[0];
-    return res.json({ success: true, name: d.name, email: d.email, resume_text: d.resume_text, job_title: d.title, job_description: d.description, agency_id: d.agency_id, candidate_id: d.candidate_id, job_id: d.job_id, user_id: d.user_id });
+    const { payload, agency_id, candidate_id, job_id, user_id } = rows[0];
+    return res.json({
+      success:          true,
+      name:             payload.candidate_name      || "",
+      email:            payload.email               || "",
+      resume_text:      payload.resume_text         || "",
+      job_title:        payload.job_title           || payload.job_role || "",
+      job_description:  payload.job_description     || "",
+      agency_id:        payload.agency_id           || agency_id || "",
+      candidate_id:     payload.candidate_id        || candidate_id || "",
+      job_id:           payload.job_id              || job_id || "",
+      user_id:          payload.user_id             || user_id || "",
+      interview_questions: payload.interview_questions || payload.async_questions || [],
+    });
   } catch (e) {
     console.error("❌ booking-token error:", e.message);
     return res.status(500).json({ success: false, error: "Failed to resolve token" });
@@ -248,7 +252,8 @@ router.get("/available-slots", async (req, res) => {
   if (DB_ENABLED && pool) {
     const client = await pool.connect();
     try {
-      const now         = new Date();
+      const { rows: timeRows } = await client.query(`SELECT NOW() AT TIME ZONE 'Asia/Kolkata' AS now`);
+      const now         = new Date(timeRows[0].now);
       const todayStr    = localDateStr(now);
       const day1Str     = localDateStr(addDays(now, 1));
       const day2Str     = localDateStr(addDays(now, 2));
