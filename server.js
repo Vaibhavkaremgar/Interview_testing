@@ -391,6 +391,9 @@ app.post("/api/save-recording", upload.single("recording"), async (req, res) => 
   return res.json({ success: true, file: file.filename, size: sizeBytes });
 });
 
+// ── SERVE RECORDINGS ───────────────────────────────────────────
+app.use("/recordings", express.static(path.join(__dirname, "recordings")));
+
 // ── HEALTH ────────────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({

@@ -425,7 +425,6 @@ async function startInterview() {
       await audioCtx.resume();
       console.log("▶️ AudioContext resumed:", audioCtx.state);
     }
-    requestFullscreen();
     startRecording();
     updateDebug();
     const sessionToken = getParam("session");
@@ -548,5 +547,6 @@ document.addEventListener('fullscreenchange', () => {
 // ── CONSENT BUTTON ─────────────────────────────────────────
 document.getElementById('consentBtn').addEventListener('click', () => {
   document.getElementById('consentScreen').style.display = 'none';
+  requestFullscreen();
   startInterview();
 });
