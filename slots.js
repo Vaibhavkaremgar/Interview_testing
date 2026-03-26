@@ -120,68 +120,59 @@ function formatTimeFull(timeStr) {
 }
 
 async function sendConfirmationEmail(candidateName, candidateEmail, slotDate, slotTime, interviewLink) {
-  if (!process.env.RESEND_API_KEY) {
-    console.log("Email skipped — RESEND_API_KEY not set");
-    console.log("Interview link:", interviewLink);
+  if (!process.env.SENDGRID_API_KEY) {
+    console.log("Email skipped — SENDGRID_API_KEY not set | link:", interviewLink);
     return false;
   }
   try {
     const displayDate = formatDateLong(slotDate);
     const displayTime = formatTimeFull(slotTime);
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
+        "Authorization": `Bearer ${process.env.SENDGRID_API_KEY}`,
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || "Pontis Interviews <onboarding@resend.dev>",
-        to: candidateEmail,
+        personalizations: [{ to: [{ email: candidateEmail, name: candidateName }] }],
+        from: { email: process.env.EMAIL_FROM || "info@pontisflow.com", name: "Pontis Interviews" },
         subject: `Interview Confirmation — ${displayDate}`,
-        html: `
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 0">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:4px;overflow:hidden;border:1px solid #e4e4e7">
-        <tr><td style="background:#1a1d27;padding:28px 40px">
-          <p style="margin:0;font-size:18px;font-weight:600;color:#ffffff">Pontis</p>
-          <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;text-transform:uppercase">AI Interview Platform</p>
-        </td></tr>
-        <tr><td style="padding:40px 40px 32px">
-          <p style="margin:0 0 24px;font-size:15px;color:#3f3f46">Dear ${candidateName},</p>
-          <p style="margin:0 0 24px;font-size:15px;color:#3f3f46;line-height:1.6">Your interview has been scheduled. Please find the details below.</p>
-          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;margin-bottom:32px">
-            <tr><td style="padding:20px 24px;border-bottom:1px solid #e2e8f0">
-              <p style="margin:0;font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600">Date</p>
-              <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">${displayDate}</p>
-            </td></tr>
-            <tr><td style="padding:20px 24px;border-bottom:1px solid #e2e8f0">
-              <p style="margin:0;font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600">Time</p>
-              <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">${displayTime}</p>
-            </td></tr>
-            <tr><td style="padding:20px 24px">
-              <p style="margin:0;font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600">Format</p>
-              <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">AI Video Interview</p>
-            </td></tr>
-          </table>
-          <table cellpadding="0" cellspacing="0" style="margin-bottom:32px">
-            <tr><td style="background:#1a73e8;border-radius:4px">
-              <a href="${interviewLink}" target="_blank" style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none">Join Interview</a>
-            </td></tr>
-          </table>
-          <p style="margin:0;font-size:12px;color:#1a73e8;word-break:break-all">${interviewLink}</p>
-        </td></tr>
-        <tr><td style="padding:24px 40px;border-top:1px solid #e4e4e7">
-          <p style="margin:0;font-size:12px;color:#a1a1aa">This is an automated message. Pontis AI Interview Platform.</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+        content: [{ type: "text/html", value: `
+<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f4f4f5;padding:40px 0">
+<table width="600" align="center" style="background:#fff;border-radius:4px;border:1px solid #e4e4e7">
+  <tr><td style="background:#1a1d27;padding:28px 40px">
+    <p style="margin:0;font-size:18px;font-weight:600;color:#fff">Pontis</p>
+    <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;text-transform:uppercase">AI Interview Platform</p>
+  </td></tr>
+  <tr><td style="padding:40px">
+    <p style="color:#3f3f46">Dear ${candidateName},</p>
+    <p style="color:#3f3f46;line-height:1.6">Your interview has been scheduled.</p>
+    <table width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;margin:20px 0">
+      <tr><td style="padding:16px 24px;border-bottom:1px solid #e2e8f0">
+        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase">Date</p>
+        <p style="margin:4px 0 0;color:#0f172a;font-weight:500">${displayDate}</p>
+      </td></tr>
+      <tr><td style="padding:16px 24px;border-bottom:1px solid #e2e8f0">
+        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase">Time</p>
+        <p style="margin:4px 0 0;color:#0f172a;font-weight:500">${displayTime}</p>
+      </td></tr>
+      <tr><td style="padding:16px 24px">
+        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase">Format</p>
+        <p style="margin:4px 0 0;color:#0f172a;font-weight:500">AI Video Interview</p>
+      </td></tr>
+    </table>
+    <table cellpadding="0" cellspacing="0" style="margin:24px 0">
+      <tr><td style="background:#1a73e8;border-radius:4px">
+        <a href="${interviewLink}" style="display:inline-block;padding:13px 28px;color:#fff;font-size:14px;font-weight:600;text-decoration:none">Join Interview</a>
+      </td></tr>
+    </table>
+    <p style="font-size:12px;color:#1a73e8;word-break:break-all">${interviewLink}</p>
+  </td></tr>
+  <tr><td style="padding:20px 40px;border-top:1px solid #e4e4e7">
+    <p style="margin:0;font-size:12px;color:#a1a1aa">This is an automated message. Pontis AI Interview Platform.</p>
+  </td></tr>
+</table>
+</body></html>` }],
       }),
     });
     if (!res.ok) {
