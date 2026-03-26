@@ -1,7 +1,6 @@
 const express = require("express");
 const router  = express.Router();
 const { v4: uuidv4 } = require("uuid");
-const nodemailer = require("nodemailer");
 
 const FRONTEND_INTERVIEW_URL = process.env.FRONTEND_INTERVIEW_URL || "http://localhost:3000/interview";
 const DB_ENABLED = !!process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("user:password");
@@ -121,28 +120,25 @@ function formatTimeFull(timeStr) {
 }
 
 async function sendConfirmationEmail(candidateName, candidateEmail, slotDate, slotTime, interviewLink) {
-  if (!process.env.GMAIL_SENDER || !process.env.GMAIL_APP_PASSWORD) {
-    console.log("Email skipped — GMAIL_SENDER / GMAIL_APP_PASSWORD not set");
+  if (!process.env.RESEND_API_KEY) {
+    console.log("Email skipped — RESEND_API_KEY not set");
     console.log("Interview link:", interviewLink);
     return false;
   }
   try {
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 587,
-      secure: false,
-      family: 4,
-      auth: { user: process.env.GMAIL_SENDER, pass: process.env.GMAIL_APP_PASSWORD },
-    });
-
     const displayDate = formatDateLong(slotDate);
     const displayTime = formatTimeFull(slotTime);
-
-    await transporter.sendMail({
-      from:    `Pontis Interviews <${process.env.GMAIL_SENDER}>`,
-      to:      candidateEmail,
-      subject: `Interview Confirmation — ${displayDate}`,
-      html: `
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM || "Pontis Interviews <onboarding@resend.dev>",
+        to: candidateEmail,
+        subject: `Interview Confirmation — ${displayDate}`,
+        html: `
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -150,61 +146,49 @@ async function sendConfirmationEmail(candidateName, candidateEmail, slotDate, sl
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 0">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:4px;overflow:hidden;border:1px solid #e4e4e7">
-        <tr>
-          <td style="background:#1a1d27;padding:28px 40px">
-            <p style="margin:0;font-size:18px;font-weight:600;color:#ffffff;letter-spacing:0.3px">Pontis</p>
-            <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;letter-spacing:0.5px;text-transform:uppercase">AI Interview Platform</p>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:40px 40px 32px">
-            <p style="margin:0 0 24px;font-size:15px;color:#3f3f46">Dear ${candidateName},</p>
-            <p style="margin:0 0 24px;font-size:15px;color:#3f3f46;line-height:1.6">Your interview has been scheduled. Please find the details below.</p>
-            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;margin-bottom:32px">
-              <tr>
-                <td style="padding:20px 24px;border-bottom:1px solid #e2e8f0">
-                  <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:#94a3b8;font-weight:600">Date</p>
-                  <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">${displayDate}</p>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:20px 24px;border-bottom:1px solid #e2e8f0">
-                  <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:#94a3b8;font-weight:600">Time</p>
-                  <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">${displayTime}</p>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:20px 24px">
-                  <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:#94a3b8;font-weight:600">Format</p>
-                  <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">AI Video Interview</p>
-                </td>
-              </tr>
-            </table>
-            <p style="margin:0 0 20px;font-size:15px;color:#3f3f46;line-height:1.6">Please join the interview at your scheduled time using the link below. Ensure your camera and microphone are working before joining.</p>
-            <table cellpadding="0" cellspacing="0" style="margin-bottom:32px">
-              <tr>
-                <td style="background:#1a73e8;border-radius:4px">
-                  <a href="${interviewLink}" target="_blank" style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;letter-spacing:0.2px">Join Interview</a>
-                </td>
-              </tr>
-            </table>
-            <p style="margin:0 0 8px;font-size:13px;color:#71717a">If the button above does not work, copy and paste the following link into your browser:</p>
-            <p style="margin:0;font-size:12px;color:#1a73e8;word-break:break-all"><a href="${interviewLink}" style="color:#1a73e8;text-decoration:none">${interviewLink}</a></p>
-          </td>
-        </tr>
-        <tr><td style="padding:0 40px"><hr style="border:none;border-top:1px solid #e4e4e7;margin:0"></td></tr>
-        <tr>
-          <td style="padding:24px 40px">
-            <p style="margin:0 0 4px;font-size:12px;color:#a1a1aa">This is an automated message. Please do not reply to this email.</p>
-            <p style="margin:0;font-size:12px;color:#a1a1aa">Pontis AI Interview Platform</p>
-          </td>
-        </tr>
+        <tr><td style="background:#1a1d27;padding:28px 40px">
+          <p style="margin:0;font-size:18px;font-weight:600;color:#ffffff">Pontis</p>
+          <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;text-transform:uppercase">AI Interview Platform</p>
+        </td></tr>
+        <tr><td style="padding:40px 40px 32px">
+          <p style="margin:0 0 24px;font-size:15px;color:#3f3f46">Dear ${candidateName},</p>
+          <p style="margin:0 0 24px;font-size:15px;color:#3f3f46;line-height:1.6">Your interview has been scheduled. Please find the details below.</p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;margin-bottom:32px">
+            <tr><td style="padding:20px 24px;border-bottom:1px solid #e2e8f0">
+              <p style="margin:0;font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600">Date</p>
+              <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">${displayDate}</p>
+            </td></tr>
+            <tr><td style="padding:20px 24px;border-bottom:1px solid #e2e8f0">
+              <p style="margin:0;font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600">Time</p>
+              <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">${displayTime}</p>
+            </td></tr>
+            <tr><td style="padding:20px 24px">
+              <p style="margin:0;font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600">Format</p>
+              <p style="margin:6px 0 0;font-size:15px;color:#0f172a;font-weight:500">AI Video Interview</p>
+            </td></tr>
+          </table>
+          <table cellpadding="0" cellspacing="0" style="margin-bottom:32px">
+            <tr><td style="background:#1a73e8;border-radius:4px">
+              <a href="${interviewLink}" target="_blank" style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none">Join Interview</a>
+            </td></tr>
+          </table>
+          <p style="margin:0;font-size:12px;color:#1a73e8;word-break:break-all">${interviewLink}</p>
+        </td></tr>
+        <tr><td style="padding:24px 40px;border-top:1px solid #e4e4e7">
+          <p style="margin:0;font-size:12px;color:#a1a1aa">This is an automated message. Pontis AI Interview Platform.</p>
+        </td></tr>
       </table>
     </td></tr>
   </table>
 </body>
 </html>`,
+      }),
     });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("Email failed:", err);
+      return false;
+    }
     console.log("Email sent to", candidateEmail);
     return true;
   } catch (e) {
