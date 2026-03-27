@@ -500,6 +500,7 @@ document.getElementById("bookBtn").addEventListener("click", async () => {
       body: JSON.stringify({
         slot_id: selectedSlot.slot_id, name, email,
         bookingToken: token || "",
+        interviewQuestions: cfg.interviewQuestions || [],
         resume: cfg.resume, jobDescription: cfg.jobDescription,
         jobRole: cfg.jobRole, agencyId: cfg.agencyId,
         userId: cfg.userId, jobId: cfg.jobId, candidateId: cfg.candidateId,

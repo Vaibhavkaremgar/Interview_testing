@@ -60,6 +60,8 @@ async function initializeConfig() {
         resume:         sessionData.resume_text || variableValues.resume,
         jobDescription: sessionData.job_description || variableValues.jobDescription,
         jobRole:        sessionData.job_title || variableValues.jobRole,
+        skills:         sessionData.skills || variableValues.skills || "",
+        agencyName:     sessionData.agency_name || variableValues.agencyName || "",
         agencyId:       sessionData.agency_id || variableValues.agencyId,
         candidateId:    sessionData.candidate_id || variableValues.candidateId,
         userId:         variableValues.userId,

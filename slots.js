@@ -341,7 +341,7 @@ router.post("/book-slot", async (req, res) => {
   const {
     slot_id, email, name, bookingToken,
     resume = "", jobDescription = "", jobRole = "", agencyId = "", userId = "", jobId = "", candidateId = "",
-    async_questions = [], asyncQuestions,
+    async_questions = [], asyncQuestions, interviewQuestions,
   } = req.body;
 
   if (!slot_id || !email || !name) {
@@ -387,6 +387,7 @@ router.post("/book-slot", async (req, res) => {
       let finalResume = resume;
       let finalJD = jobDescription;
       let finalJobRole = jobRole;
+      const finalQuestions = interviewQuestions || async_questions || asyncQuestions || [];
       if (!finalResume || !finalJD) {
         const { rows: cRows } = await client.query(
           `SELECT c.resume_text, c.predefined_questions, c.job_id,
@@ -414,7 +415,7 @@ router.post("/book-slot", async (req, res) => {
       const asyncQuestionsPayload = JSON.stringify(normalizedAsyncQuestions);
 
       const { rows: sr } = await client.query(
-        `INSERT INTO interview_sessions (agency_id, job_id, candidate_id, user_id, slot_id, candidate_name, email, job_role, jd_text, resume_text, session_token, async_questions, status)
+        `INSERT INTO interview_sessions (agency_id, job_id, candidate_id, user_id, slot_id, candidate_name, email, job_role, jd_text, resume_text, session_token, interview_questions, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'scheduled')
          RETURNING id, session_token`,
         [
@@ -429,7 +430,7 @@ router.post("/book-slot", async (req, res) => {
           finalJD,
           finalResume,
           sessionToken,
-          asyncQuestionsPayload,
+          JSON.stringify(finalQuestions),
         ]
       );
       sessionId = sr[0].id;
@@ -482,7 +483,7 @@ router.get("/session-info/:sessionToken", async (req, res) => {
   try {
     // Read directly from interview_sessions — all data was stored here at booking time
     const { rows } = await client.query(
-      `SELECT candidate_name, email, resume_text, job_role, jd_text, agency_id, candidate_id, user_id, job_id, session_token, last_transcript_snapshot, async_questions
+      `SELECT candidate_name, email, resume_text, job_role, jd_text, agency_id, candidate_id, user_id, job_id, session_token, last_transcript_snapshot, interview_questions
        FROM interview_sessions
        WHERE session_token = $1`,
       [sessionToken]
@@ -515,7 +516,7 @@ router.get("/session-info/:sessionToken", async (req, res) => {
       session_token: d.session_token,
       resumed: !!d.last_transcript_snapshot,
       lastTranscript: d.last_transcript_snapshot || null,
-      async_questions: asyncQuestions,
+      interview_questions: d.interview_questions || [],
     });
   } catch (e) {
     console.error("❌ session-info error:", e.message);
