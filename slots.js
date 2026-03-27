@@ -296,7 +296,7 @@ router.get("/available-slots", async (req, res) => {
     const client = await pool.connect();
     try {
       const { rows: timeRows } = await client.query(`SELECT NOW() AT TIME ZONE 'Asia/Kolkata' AS now`);
-      const now         = new Date(timeRows[0].now);
+      const now         = new Date(timeRows[0].now + '+05:30');
       const todayStr    = localDateStr(now);
       const day1Str     = localDateStr(addDays(now, 1));
       const day2Str     = localDateStr(addDays(now, 2));
