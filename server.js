@@ -334,7 +334,6 @@ async function processWebhook(body) {
     await saveEvaluation(session, evaluation, transcript, recordingUrl);
 
     delete sessions[callId];
-    return res.json({});
   }
 
   console.log("⚠️  Unhandled type:", messageType);

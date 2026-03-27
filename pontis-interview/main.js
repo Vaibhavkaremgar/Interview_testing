@@ -46,6 +46,8 @@ async function initializeConfig() {
     userId:         getParam("userId")         || "",
     candidateId:    getParam("candidateId")    || "",
     jobId:          getParam("jobId")          || "",
+    asyncQuestions: [],
+    async_questions: [],
   };
 
   // If session token provided, fetch metadata from backend
@@ -67,6 +69,11 @@ async function initializeConfig() {
       // Add optional interview_questions if available
       if (sessionData.interview_questions) {
         variableValues.interviewQuestions = sessionData.interview_questions;
+      }
+      const asyncQuestionsFromSession = sessionData.async_questions || sessionData.asyncQuestions;
+      if (asyncQuestionsFromSession) {
+        variableValues.asyncQuestions = asyncQuestionsFromSession;
+        variableValues.async_questions = asyncQuestionsFromSession;
       }
       if (sessionData.resumed && sessionData.lastTranscript) {
         variableValues.resuming = "true";
@@ -501,6 +508,8 @@ async function startInterview() {
         candidateId:    variableValues.candidateId,
         userId:         variableValues.userId,
         jobId:          variableValues.jobId,
+        asyncQuestions:  variableValues.asyncQuestions || variableValues.async_questions || [],
+        async_questions: variableValues.async_questions || variableValues.asyncQuestions || [],
         session:        getParam("session") || "",
         resuming:        variableValues.resuming        || "false",
         previousContext: variableValues.previousContext || "",

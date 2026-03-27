@@ -1,6 +1,8 @@
 const express = require("express");
 const router  = express.Router();
 const { v4: uuidv4 } = require("uuid");
+const { Resend } = require("resend");
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const FRONTEND_INTERVIEW_URL = process.env.FRONTEND_INTERVIEW_URL || "http://localhost:3000/interview";
 const DB_ENABLED = !!process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("user:password");
@@ -119,73 +121,136 @@ function formatTimeFull(timeStr) {
   return `${hour > 12 ? hour - 12 : hour || 12}:${m} ${hour >= 12 ? "PM" : "AM"}`;
 }
 
-async function sendConfirmationEmail(candidateName, candidateEmail, slotDate, slotTime, interviewLink) {
-  if (!process.env.SENDGRID_API_KEY) {
-    console.log("Email skipped — SENDGRID_API_KEY not set | link:", interviewLink);
-    return false;
-  }
-  try {
-    const displayDate = formatDateLong(slotDate);
-    const displayTime = formatTimeFull(slotTime);
-    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.SENDGRID_API_KEY}`,
-      },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: candidateEmail, name: candidateName }] }],
-        from: { email: process.env.EMAIL_FROM || "info@pontisflow.com", name: "Pontis Interviews" },
-        subject: `Interview Confirmation — ${displayDate}`,
-        content: [{ type: "text/html", value: `
-<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f4f4f5;padding:40px 0">
-<table width="600" align="center" style="background:#fff;border-radius:4px;border:1px solid #e4e4e7">
-  <tr><td style="background:#1a1d27;padding:28px 40px">
-    <p style="margin:0;font-size:18px;font-weight:600;color:#fff">Pontis</p>
-    <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;text-transform:uppercase">AI Interview Platform</p>
-  </td></tr>
-  <tr><td style="padding:40px">
-    <p style="color:#3f3f46">Dear ${candidateName},</p>
-    <p style="color:#3f3f46;line-height:1.6">Your interview has been scheduled.</p>
-    <table width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;margin:20px 0">
-      <tr><td style="padding:16px 24px;border-bottom:1px solid #e2e8f0">
-        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase">Date</p>
-        <p style="margin:4px 0 0;color:#0f172a;font-weight:500">${displayDate}</p>
-      </td></tr>
-      <tr><td style="padding:16px 24px;border-bottom:1px solid #e2e8f0">
-        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase">Time</p>
-        <p style="margin:4px 0 0;color:#0f172a;font-weight:500">${displayTime}</p>
-      </td></tr>
-      <tr><td style="padding:16px 24px">
-        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase">Format</p>
-        <p style="margin:4px 0 0;color:#0f172a;font-weight:500">AI Video Interview</p>
-      </td></tr>
-    </table>
-    <table cellpadding="0" cellspacing="0" style="margin:24px 0">
-      <tr><td style="background:#1a73e8;border-radius:4px">
-        <a href="${interviewLink}" style="display:inline-block;padding:13px 28px;color:#fff;font-size:14px;font-weight:600;text-decoration:none">Join Interview</a>
-      </td></tr>
-    </table>
-    <p style="font-size:12px;color:#1a73e8;word-break:break-all">${interviewLink}</p>
-  </td></tr>
-  <tr><td style="padding:20px 40px;border-top:1px solid #e4e4e7">
-    <p style="margin:0;font-size:12px;color:#a1a1aa">This is an automated message. Pontis AI Interview Platform.</p>
-  </td></tr>
-</table>
-</body></html>` }],
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      console.error("Email failed:", err);
-      return false;
-    }
-    console.log("Email sent to", candidateEmail);
-    return true;
-  } catch (e) {
-    console.error("Email failed:", e.message);
-    return false;
-  }
+async function sendConfirmationEmail(name, email, date, time, interviewLink) {
+  const displayDate = formatDateLong(date);
+  const displayTime = formatTimeFull(time);
+  const firstName   = name.split(" ")[0];
+
+  await resend.emails.send({
+    from: 'Pontis Interviews <onboarding@resend.dev>',
+    to: email,
+    subject: `Your Interview is Confirmed — ${displayDate}`,
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 0">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#1e1b4b 0%,#312e81 60%,#4f46e5 100%);padding:36px 40px">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td>
+                  <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px">Pontis</p>
+                  <p style="margin:4px 0 0;font-size:11px;color:#a5b4fc;text-transform:uppercase;letter-spacing:1.5px">AI Interview Platform</p>
+                </td>
+                <td align="right">
+                  <span style="background:rgba(255,255,255,0.15);color:#c7d2fe;font-size:11px;font-weight:600;padding:5px 12px;border-radius:20px;letter-spacing:0.5px">✓ CONFIRMED</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:40px">
+            <p style="margin:0 0 8px;font-size:24px;font-weight:700;color:#0f172a">Hi ${firstName},</p>
+            <p style="margin:0 0 28px;font-size:15px;color:#64748b;line-height:1.6">Your AI interview has been scheduled. Here are your details:</p>
+
+            <!-- Details card -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:28px">
+              <tr>
+                <td style="padding:18px 24px;border-bottom:1px solid #e2e8f0">
+                  <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="width:36px;vertical-align:middle">
+                        <div style="width:32px;height:32px;background:#ede9fe;border-radius:8px;text-align:center;line-height:32px;font-size:16px">📅</div>
+                      </td>
+                      <td style="padding-left:14px;vertical-align:middle">
+                        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px">Date</p>
+                        <p style="margin:3px 0 0;font-size:15px;font-weight:600;color:#0f172a">${displayDate}</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:18px 24px;border-bottom:1px solid #e2e8f0">
+                  <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="width:36px;vertical-align:middle">
+                        <div style="width:32px;height:32px;background:#ede9fe;border-radius:8px;text-align:center;line-height:32px;font-size:16px">🕐</div>
+                      </td>
+                      <td style="padding-left:14px;vertical-align:middle">
+                        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px">Time</p>
+                        <p style="margin:3px 0 0;font-size:15px;font-weight:600;color:#0f172a">${displayTime}</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:18px 24px">
+                  <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="width:36px;vertical-align:middle">
+                        <div style="width:32px;height:32px;background:#ede9fe;border-radius:8px;text-align:center;line-height:32px;font-size:16px">🎥</div>
+                      </td>
+                      <td style="padding-left:14px;vertical-align:middle">
+                        <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px">Format</p>
+                        <p style="margin:3px 0 0;font-size:15px;font-weight:600;color:#0f172a">AI Video Interview</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <!-- CTA button -->
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px">
+              <tr>
+                <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:8px">
+                  <a href="${interviewLink}" style="display:inline-block;padding:15px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;letter-spacing:0.3px">Start My Interview →</a>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Tips -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;margin-bottom:24px">
+              <tr>
+                <td style="padding:16px 20px">
+                  <p style="margin:0 0 8px;font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.8px">💡 Before you begin</p>
+                  <ul style="margin:0;padding-left:18px;color:#78350f;font-size:13px;line-height:1.8">
+                    <li>Use Chrome or Edge for best compatibility</li>
+                    <li>Allow camera &amp; microphone access when prompted</li>
+                    <li>Find a quiet, well-lit space</li>
+                    <li>Test your audio before starting</li>
+                  </ul>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center">This link is unique to you — please do not share it.</p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0">
+            <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center">Pontis AI Interview Platform &nbsp;·&nbsp; This is an automated message</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+  });
 }
 
 // ── ROUTES ────────────────────────────────────────────────────
@@ -274,8 +339,9 @@ router.get("/available-slots", async (req, res) => {
 
 router.post("/book-slot", async (req, res) => {
   const {
-    slot_id, email, name,
+    slot_id, email, name, bookingToken,
     resume = "", jobDescription = "", jobRole = "", agencyId = "", userId = "", jobId = "", candidateId = "",
+    async_questions = [], asyncQuestions,
   } = req.body;
 
   if (!slot_id || !email || !name) {
@@ -340,11 +406,31 @@ router.post("/book-slot", async (req, res) => {
 
       const isUUID = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
       sessionToken = uuidv4();
+      const normalizedAsyncQuestions = Array.isArray(async_questions)
+        ? async_questions
+        : Array.isArray(asyncQuestions)
+          ? asyncQuestions
+          : [];
+      const asyncQuestionsPayload = JSON.stringify(normalizedAsyncQuestions);
+
       const { rows: sr } = await client.query(
-        `INSERT INTO interview_sessions (agency_id, job_id, candidate_id, user_id, slot_id, candidate_name, email, job_role, jd_text, resume_text, session_token, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'scheduled')
+        `INSERT INTO interview_sessions (agency_id, job_id, candidate_id, user_id, slot_id, candidate_name, email, job_role, jd_text, resume_text, session_token, async_questions, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'scheduled')
          RETURNING id, session_token`,
-        [isUUID(agencyId)?agencyId:null, isUUID(jobId)?jobId:null, actualCandidateId, isUUID(userId)?userId:null, slot_id, name, email, finalJobRole, finalJD, finalResume, sessionToken]
+        [
+          isUUID(agencyId)?agencyId:null,
+          isUUID(jobId)?jobId:null,
+          actualCandidateId,
+          isUUID(userId)?userId:null,
+          slot_id,
+          name,
+          email,
+          finalJobRole,
+          finalJD,
+          finalResume,
+          sessionToken,
+          asyncQuestionsPayload,
+        ]
       );
       sessionId = sr[0].id;
 
@@ -359,6 +445,11 @@ router.post("/book-slot", async (req, res) => {
       console.log('✅ interviews row inserted for token:', sessionToken);
 
       await client.query("COMMIT");
+      // Mark booking token as consumed — prevents rebooking
+      pool.query(
+        `UPDATE notification_workflow_tokens SET is_active = false, consumed_at = NOW() WHERE token = $1`,
+        [req.body.bookingToken || ""]
+      ).catch(() => {});
       client.release();
     } catch (e) {
       await client.query("ROLLBACK").catch(() => {});
@@ -391,13 +482,24 @@ router.get("/session-info/:sessionToken", async (req, res) => {
   try {
     // Read directly from interview_sessions — all data was stored here at booking time
     const { rows } = await client.query(
-      `SELECT candidate_name, email, resume_text, job_role, jd_text, agency_id, candidate_id, user_id, job_id, session_token, last_transcript_snapshot
+      `SELECT candidate_name, email, resume_text, job_role, jd_text, agency_id, candidate_id, user_id, job_id, session_token, last_transcript_snapshot, async_questions
        FROM interview_sessions
        WHERE session_token = $1`,
       [sessionToken]
     );
     if (!rows.length) return res.status(404).json({ success: false, error: "Session not found" });
     const d = rows[0];
+    let asyncQuestions = [];
+    if (d.async_questions) {
+      try {
+        asyncQuestions = typeof d.async_questions === "string"
+          ? JSON.parse(d.async_questions)
+          : d.async_questions;
+      } catch (parseErr) {
+        console.warn("Could not parse async_questions:", parseErr.message);
+        asyncQuestions = [];
+      }
+    }
     console.log(`✅ session-info: ${d.candidate_name} | role: ${d.job_role} | resume: ${(d.resume_text||'').length} chars | jd: ${(d.jd_text||'').length} chars`);
     return res.json({
       success: true,
@@ -413,6 +515,7 @@ router.get("/session-info/:sessionToken", async (req, res) => {
       session_token: d.session_token,
       resumed: !!d.last_transcript_snapshot,
       lastTranscript: d.last_transcript_snapshot || null,
+      async_questions: asyncQuestions,
     });
   } catch (e) {
     console.error("❌ session-info error:", e.message);
