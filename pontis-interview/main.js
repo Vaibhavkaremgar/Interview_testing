@@ -8,32 +8,34 @@ const API_BASE     = import.meta.env.VITE_API_BASE || "";
 const IS_DEV       = import.meta.env.DEV;
 
 
-// ── URL PARAMS ────────────────────────────────────────────────
+//  URL PARAMS 
 function getParam(key) {
   return new URLSearchParams(window.location.search).get(key) || null;
 }
 
-// ── FETCH SESSION METADATA ────────────────────────────────────
+//  FETCH SESSION METADATA 
 async function fetchSessionMetadata(sessionToken) {
   try {
     const res = await fetch(`${API_BASE}/api/session-info/${encodeURIComponent(sessionToken)}`);
     if (!res.ok) {
-      console.warn("Session fetch failed:", res.status);
+      const payload = await res.json().catch(() => ({}));
+      setStatus(payload.error || "Interview link is no longer available.");
       return null;
     }
     const data = await res.json();
     if (!data.success) {
-      console.warn("Session error:", data.error);
+      setStatus(data.error || "Interview error occurred.");
       return null;
     }
     return data;
   } catch (err) {
     console.error("Session fetch error:", err);
+    setStatus("Something went wrong while loading the interview.");
     return null;
   }
 }
 
-// ── INITIALIZE CONFIG ─────────────────────────────────────────
+//  INITIALIZE CONFIG 
 async function initializeConfig() {
   const sessionToken = getParam("session");
   let variableValues = {
@@ -53,6 +55,7 @@ async function initializeConfig() {
   // If session token provided, fetch metadata from backend
   if (sessionToken) {
     const sessionData = await fetchSessionMetadata(sessionToken);
+    if (!sessionData) return null;
     if (sessionData) {
       variableValues = {
         candidateName:  sessionData.name || variableValues.candidateName,
@@ -87,7 +90,7 @@ async function initializeConfig() {
   return variableValues;
 }
 
-// ── DOM REFS ──────────────────────────────────────────────────
+//  DOM REFS 
 const statusOverlay   = document.getElementById("statusOverlay");
 const statusText      = document.getElementById("statusText");
 const permError       = document.getElementById("permError");
@@ -107,7 +110,7 @@ const micBtn          = document.getElementById("micBtn");
 const camBtn          = document.getElementById("camBtn");
 const endBtn          = document.getElementById("endBtn");
 
-// ── STATE ─────────────────────────────────────────────────────
+//  STATE 
 let localStream        = null;
 let isMuted            = false;
 let isCamOff           = false;
@@ -120,12 +123,13 @@ let heartbeatInterval  = null;
 let mediaRecorder      = null;
 let recordingChunks    = [];
 let vapiRecordingUrl   = null;
+let proctoringTerminated = false;
 
 let audioCtx = null;
 let vapiAudioCaptured = false;
 const tappedElements = new WeakSet();
 
-// ── DEBUG OVERLAY (dev only) ───────────────────────────────────
+//  DEBUG OVERLAY (dev only) 
 let debugEl = null;
 if (IS_DEV) {
   debugEl = document.createElement("div");
@@ -140,26 +144,26 @@ function updateDebug() {
   const recStatus   = mediaRecorder?.state === "recording" ? "RUNNING" : "STOPPED";
   const sizeKB      = recordingChunks.reduce((a, c) => a + c.size, 0) / 1024;
   debugEl.innerHTML =
-    `🎤 Candidate mic: <b>${micActive}</b><br>` +
-    `🤖 Vapi AI audio: <b style="color:${vapiAudioCaptured?'#4ade80':'#f87171'}">${vapiStatus}</b><br>` +
-    `⏺️ Recording: <b>${recStatus}</b><br>` +
-    `💾 Size est: <b>${sizeKB.toFixed(1)} KB</b>`;
+    ` Candidate mic: <b>${micActive}</b><br>` +
+    ` Vapi AI audio: <b style="color:${vapiAudioCaptured?'#4ade80':'#f87171'}">${vapiStatus}</b><br>` +
+    ` Recording: <b>${recStatus}</b><br>` +
+    ` Size est: <b>${sizeKB.toFixed(1)} KB</b>`;
 }
 
-// ── RECORDING — Web Audio mixer (mic + Vapi AI audio + video) ────────────
+//  RECORDING  Web Audio mixer (mic + Vapi AI audio + video) 
 async function startRecording() {
   if (!localStream || !window.MediaRecorder) return;
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000, latencyHint: "interactive" });
     window._audioCtx = audioCtx;
     if (audioCtx.state === "suspended") await audioCtx.resume();
-    console.log("▶️ AudioContext state:", audioCtx.state);
+    console.log(" AudioContext state:", audioCtx.state);
     const dest = audioCtx.createMediaStreamDestination();
 
-    // Candidate mic → mixer
+    // Candidate mic  mixer
     audioCtx.createMediaStreamSource(localStream).connect(dest);
 
-    // Vapi <audio> → mixer with retry loop
+    // Vapi <audio>  mixer with retry loop
     let vapiAudio = null;
     for (let i = 0; i < 10; i++) {
       vapiAudio = document.querySelector("audio[autoplay]") || document.querySelector("audio");
@@ -179,27 +183,27 @@ async function startRecording() {
             : null;
 
           if (vapiStream) {
-            // Tap stream directly — audio element plays to speakers untouched
+            // Tap stream directly  audio element plays to speakers untouched
             const vapiSource = audioCtx.createMediaStreamSource(vapiStream);
             vapiSource.connect(dest); // recorder only, NOT audioCtx.destination
-            console.log("🎤 Vapi stream tapped via srcObject:", {
+            console.log(" Vapi stream tapped via srcObject:", {
               tracks: vapiStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled })),
             });
           } else {
-            console.warn("⚠️ vapiAudio.srcObject is not a MediaStream — audio capture skipped");
+            console.warn(" vapiAudio.srcObject is not a MediaStream  audio capture skipped");
           }
         } catch (e) {
-          console.warn("⚠️ Vapi audio tap failed:", e.message);
+          console.warn(" Vapi audio tap failed:", e.message);
         }
       }
 
       vapiAudioCaptured = true;
     } else {
       vapiAudioCaptured = false;
-      console.warn("⚠️ Vapi audio element not found after retries");
+      console.warn(" Vapi audio element not found after retries");
     }
 
-    // Video track + mixed audio → MediaRecorder
+    // Video track + mixed audio  MediaRecorder
     const videoTrack = localStream.getVideoTracks()[0];
     const mixed = new MediaStream([
       ...dest.stream.getAudioTracks(),
@@ -212,9 +216,9 @@ async function startRecording() {
     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) { recordingChunks.push(e.data); updateDebug(); } };
     mediaRecorder.start(5000);
     updateDebug();
-    console.log("🔴 Recording started — mimeType:", mimeType || "default");
+    console.log(" Recording started  mimeType:", mimeType || "default");
   } catch (e) {
-    console.error("❌ Recording setup failed:", e.message);
+    console.error(" Recording setup failed:", e.message);
   }
 }
 
@@ -227,16 +231,16 @@ async function stopAndUpload() {
       updateDebug();
       const blob = new Blob(recordingChunks, { type: mediaRecorder.mimeType || "video/webm" });
       recordingChunks = [];
-      console.log("💾 Recording blob:", (blob.size / 1024 / 1024).toFixed(2), "MB");
+      console.log(" Recording blob:", (blob.size / 1024 / 1024).toFixed(2), "MB");
       try {
         const fd = new FormData();
         fd.append("recording", blob, "interview.webm");
         fd.append("sessionToken", getParam("session") || "");
         const res = await fetch(`${API_BASE}/api/save-recording`, { method: "POST", body: fd });
         const data = await res.json();
-        console.log("✅ Upload:", data.file);
+        console.log(" Upload:", data.file);
       } catch (e) {
-        console.error("❌ Upload failed:", e.message);
+        console.error(" Upload failed:", e.message);
       }
       resolve();
     };
@@ -245,7 +249,7 @@ async function stopAndUpload() {
 }
 
 
-// ── CAMERA + MIC SETUP ────────────────────────────────────────
+//  CAMERA + MIC SETUP 
 async function setupCamera() {
   statusText.textContent = "Requesting camera & microphone...";
   try {
@@ -272,7 +276,7 @@ function showPermError() {
   permError.style.display     = "flex";
 }
 
-// ── TIMER ─────────────────────────────────────────────────────
+//  TIMER 
 function startTimer() {
   callStartTime = Date.now();
   timerInterval = setInterval(() => {
@@ -287,7 +291,7 @@ function stopTimer() {
   clearInterval(timerInterval);
 }
 
-// ── TRANSCRIPT ────────────────────────────────────────────────
+//  TRANSCRIPT 
 let lastRole  = null;
 let lastEntry = null;
 
@@ -312,24 +316,24 @@ function setLiveIndicator(text) {
   liveIndicator.innerHTML = text;
 }
 
-// ── SPEAKING INDICATORS ───────────────────────────────────────
+//  SPEAKING INDICATORS 
 function setAgentSpeaking(speaking) {
   agentTile.classList.toggle("speaking", speaking);
-  document.getElementById("agentMicIcon").textContent = speaking ? "🔊" : "🎙️";
+  document.getElementById("agentMicIcon").textContent = speaking ? "" : "";
 }
 
 function setCandidateSpeaking(speaking) {
   candidateTile.classList.toggle("speaking", speaking);
-  document.getElementById("candidateMicIcon").textContent = speaking ? "🔊" : "🎙️";
+  document.getElementById("candidateMicIcon").textContent = speaking ? "" : "";
 }
 
-// ── CAMERA WARNING (Vapi voice) ──────────────────────────────────
+//  CAMERA WARNING (Vapi voice) 
 let camOffSince = null;
 
 function warnCameraOff(secondsOff) {
   if (!vapi || !isCamOff) return;
   const msg = secondsOff >= 60
-    ? "The candidate camera has been off for over a minute. End the interview now and inform the candidate their session is terminated due to camera violation."
+    ? "The candidate camera has been off for over 45 seconds. End the interview now and inform the candidate their session is terminated due to camera violation."
     : "The candidate camera is off. Stop and firmly ask them to turn it back on before continuing. This is required.";
   vapi.send({ type: "add-message", message: { role: "system", content: msg } });
 }
@@ -341,11 +345,11 @@ function startCamWarning() {
     if (!isCamOff) { stopCamWarning(); return; }
     const secondsOff = Math.floor((Date.now() - camOffSince) / 1000);
     warnCameraOff(secondsOff);
-    if (secondsOff >= 60) {
-      console.warn('Camera off 60s - terminating');
-      setTimeout(() => { stopCamWarning(); if (vapi) vapi.stop(); endCall(); }, 3000);
+    if (secondsOff >= 45) {
+      console.warn('Camera off 45s - terminating');
+      terminateInterview("Camera was turned off for too long.");
     }
-  }, 30000);
+  }, 15000);
 }
 
 function stopCamWarning() {
@@ -356,18 +360,18 @@ function stopCamWarning() {
 
 
 
-// ── STATUS ────────────────────────────────────────────────────
+//  STATUS 
 function setStatus(msg) { statusText.textContent = msg; }
 function hideOverlay()  { statusOverlay.style.display = "none"; }
 
-// ── CONTROLS ──────────────────────────────────────────────────
+//  CONTROLS 
 micBtn.addEventListener("click", async () => {
   if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
   if (!vapi) return;
   isMuted = !isMuted;
   vapi.setMuted(isMuted);
   if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
-  micBtn.textContent = isMuted ? "🔇" : "🎙️";
+  micBtn.textContent = isMuted ? "" : "";
   micBtn.classList.toggle("off", isMuted);
   micBtn.classList.toggle("active", !isMuted);
 });
@@ -378,7 +382,7 @@ camBtn.addEventListener("click", () => {
   localStream.getVideoTracks().forEach(t => t.enabled = !isCamOff);
   candidateVideo.style.display = isCamOff ? "none" : "block";
   camOffOverlay.style.display  = isCamOff ? "flex"  : "none";
-  camBtn.textContent = isCamOff ? "🚫" : "📷";
+  camBtn.textContent = isCamOff ? "" : "";
   camBtn.classList.toggle("off", isCamOff);
   camBtn.classList.toggle("active", !isCamOff);
   if (isCamOff) startCamWarning();
@@ -399,11 +403,15 @@ async function endCall() {
   endedScreen.style.display = "flex";
 }
 
-// ── VAPI ──────────────────────────────────────────────────────
+//  VAPI 
 async function startInterview() {
   // Initialize config (fetch session metadata if available)
   setStatus("Loading interview details...");
   variableValues = await initializeConfig();
+  if (!variableValues) return;
+
+  tabSwitchCount = 0;
+  proctoringTerminated = false;
 
   // Update UI with candidate name
   const initials = variableValues.candidateName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
@@ -415,7 +423,7 @@ async function startInterview() {
   if (!camOk) return;
 
   // Debug: verify metadata loaded
-  console.log("📋 Interview config:", {
+  console.log(" Interview config:", {
     name: variableValues.candidateName,
     role: variableValues.jobRole,
     resumeChars: variableValues.resume?.length || 0,
@@ -427,12 +435,12 @@ async function startInterview() {
 
   vapi.on("call-start", async () => {
     hideOverlay();
-    callInfo.textContent = `Interview · ${variableValues.candidateName}`;
+    callInfo.textContent = `Interview  ${variableValues.candidateName}`;
     startTimer();
-    setLiveIndicator("Interview started — AI is speaking...");
+    setLiveIndicator("Interview started  AI is speaking...");
     if (audioCtx && audioCtx.state === "suspended") {
       await audioCtx.resume();
-      console.log("▶️ AudioContext resumed:", audioCtx.state);
+      console.log(" AudioContext resumed:", audioCtx.state);
     }
     startRecording();
     updateDebug();
@@ -453,7 +461,7 @@ async function startInterview() {
     // Capture Vapi's server-side recording URL if available
     vapiRecordingUrl = callData?.recordingUrl || callData?.artifact?.recordingUrl || null;
     if (vapiRecordingUrl) {
-      console.log("🎥 Vapi recording URL:", vapiRecordingUrl);
+      console.log(" Vapi recording URL:", vapiRecordingUrl);
       fetch(`${API_BASE}/api/save-recording-url`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -525,8 +533,23 @@ async function startInterview() {
 
 // startInterview() is called by consent screen button in index.html
 
-// ── TAB SWITCH PROCTORING ─────────────────────────────────────
+//  TAB SWITCH PROCTORING 
 let tabSwitchCount = 0;
+function terminateInterview(reason) {
+  if (proctoringTerminated) return;
+  proctoringTerminated = true;
+  const message = `Interview terminated: ${reason}`;
+  if (vapi) {
+    try {
+      vapi.send({ type: 'add-message', message: { role: 'system', content: message } });
+    } catch (err) {
+      console.warn('Could not send proctoring notice:', err.message);
+    }
+    vapi.stop();
+  }
+  setStatus(message);
+  endCall();
+}
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden' || !vapi) return;
   tabSwitchCount++;
@@ -540,9 +563,12 @@ document.addEventListener('visibilitychange', () => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session_token: getParam('session') || '', transcript_so_far: '[PROCTORING] Tab switch #' + tabSwitchCount + ' at ' + new Date().toISOString() }),
   }).catch(() => {});
+  if (tabSwitchCount > 3) {
+    terminateInterview('Repeated tab switching detected.');
+  }
 });
 
-// ── FULLSCREEN ENFORCEMENT ────────────────────────────────────
+//  FULLSCREEN ENFORCEMENT 
 function requestFullscreen() {
   const el = document.documentElement;
   if (el.requestFullscreen) el.requestFullscreen();
@@ -555,7 +581,7 @@ document.addEventListener('fullscreenchange', () => {
   vapi.send({ type: 'add-message', message: { role: 'system', content: 'The candidate has exited fullscreen mode. Stop and instruct them to return to fullscreen immediately to continue the interview.' } });
 });
 
-// ── CONSENT BUTTON ─────────────────────────────────────────
+//  CONSENT BUTTON 
 document.getElementById('consentBtn').addEventListener('click', () => {
   document.getElementById('consentScreen').style.display = 'none';
   requestFullscreen();
