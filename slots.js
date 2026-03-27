@@ -273,7 +273,7 @@ router.get("/booking-token/:token", async (req, res) => {
     return res.json({
       success:          true,
       name:             payload.candidate_name      || "",
-      email:            payload.email               || "",
+      email:            payload.email               || payload.candidate_email || "",
       resume_text:      payload.resume_text         || "",
       job_title:        payload.job_title           || payload.job_role || "",
       job_description:  payload.job_description     || "",
