@@ -81,16 +81,12 @@ export async function GET(request, { params }) {
       ? slotMeta.slot_date.toISOString().slice(0, 10)
       : slotMeta?.slot_date || null;
     const slotTimeStr = slotMeta?.slot_time ? slotMeta.slot_time.toString().slice(0, 8) : null;
+    let expired = false;
     const slotStart = parseSlotStart(slotDateStr, slotTimeStr);
     if (slotStart) {
       const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
       if (Date.now() > slotEnd.getTime()) {
-        return withCors(NextResponse.json({
-          success: false,
-          error: "Interview link expired for the selected slot",
-          slot_date: slotDateStr,
-          slot_time: slotTimeStr,
-        }, { status: 410 }));
+        expired = true;
       }
     }
 
@@ -116,6 +112,7 @@ export async function GET(request, { params }) {
       interview_questions: interviewQuestions,
       slot_date: slotDateStr,
       slot_time: slotTimeStr,
+      expired,
     }));
   } catch (e) {
     console.error("session-info error:", e.message);

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { use } from "react";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ function buildQuery(searchParams) {
 }
 
 export default function InterviewCatchAll({ searchParams }) {
-  const suffix = buildQuery(searchParams);
+  const sp = typeof searchParams?.then === "function" ? use(searchParams) : searchParams;
+  const suffix = buildQuery(sp);
   redirect(`/interview/index.html${suffix}`);
 }
