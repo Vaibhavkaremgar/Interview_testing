@@ -9,7 +9,10 @@ export function OPTIONS() {
 }
 
 export async function GET(request, { params }) {
-  const token = params?.token || "";
+  const url = new URL(request.url);
+  const tokenFromQuery = url.searchParams.get("token");
+  const tokenFromPath = params?.token || url.pathname.split("/").pop();
+  const token = (tokenFromQuery || tokenFromPath || "").trim();
   if (!token.trim()) {
     return withCors(NextResponse.json({ success: false, error: "Token is required" }, { status: 400 }));
   }
