@@ -31,19 +31,29 @@ export async function GET(request, { params }) {
     if (!rows.length) {
       return withCors(NextResponse.json({ success: false, error: "Token invalid, expired, or already used" }, { status: 404 }));
     }
-    const { payload, agency_id, candidate_id, job_id, user_id } = rows[0];
+    let payload = rows[0].payload || {};
+    if (typeof payload === "string") {
+      try { payload = JSON.parse(payload); } catch { payload = {}; }
+    }
+    const { agency_id, candidate_id, job_id, user_id } = rows[0];
+    const pick = (obj, keys, fallback = "") => {
+      for (const k of keys) {
+        if (obj && obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== "") return obj[k];
+      }
+      return fallback;
+    };
     return withCors(NextResponse.json({
       success: true,
-      name: payload.candidate_name || "",
-      email: payload.email || payload.candidate_email || "",
-      resume_text: payload.resume_text || "",
-      job_title: payload.job_title || payload.job_role || "",
-      job_description: payload.job_description || "",
-      agency_id: payload.agency_id || agency_id || "",
-      candidate_id: payload.candidate_id || candidate_id || "",
-      job_id: payload.job_id || job_id || "",
-      user_id: payload.user_id || user_id || "",
-      interview_questions: payload.interview_questions || payload.async_questions || [],
+      name: pick(payload, ["candidate_name", "candidateName", "name"]),
+      email: pick(payload, ["email", "candidate_email", "candidateEmail"]),
+      resume_text: pick(payload, ["resume_text", "resume", "resumeText"]),
+      job_title: pick(payload, ["job_title", "job_role", "jobRole", "role", "title"]),
+      job_description: pick(payload, ["job_description", "jobDescription", "jd_text", "jd", "description"]),
+      agency_id: pick(payload, ["agency_id", "agencyId"], agency_id || ""),
+      candidate_id: pick(payload, ["candidate_id", "candidateId"], candidate_id || ""),
+      job_id: pick(payload, ["job_id", "jobId"], job_id || ""),
+      user_id: pick(payload, ["user_id", "userId"], user_id || ""),
+      interview_questions: payload.interview_questions || payload.async_questions || payload.asyncQuestions || [],
     }));
   } catch (e) {
     console.error("booking-token error:", e.message);
