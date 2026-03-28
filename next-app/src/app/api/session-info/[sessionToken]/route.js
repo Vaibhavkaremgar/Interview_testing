@@ -32,6 +32,30 @@ export async function GET(request, { params }) {
     }
 
     const d = rows[0];
+    const isEmpty = (v) => v === null || v === undefined || String(v).trim() === "";
+
+    // If critical fields are missing, try to hydrate from related tables.
+    if (isEmpty(d.candidate_name) || isEmpty(d.email) || isEmpty(d.resume_text) || isEmpty(d.jd_text) || isEmpty(d.job_role)) {
+      try {
+        const fallback = await client.query(
+          `SELECT c.name, c.email, c.resume_text, jd.title AS job_title, jd.description AS jd_text
+           FROM interview_sessions s
+           LEFT JOIN candidates c ON c.id = s.candidate_id
+           LEFT JOIN job_descriptions jd ON jd.id = s.job_id
+           WHERE s.session_token = $1`,
+          [sessionToken]
+        );
+        if (fallback.rows.length) {
+          d.candidate_name = d.candidate_name || fallback.rows[0].name || "";
+          d.email = d.email || fallback.rows[0].email || "";
+          d.resume_text = d.resume_text || fallback.rows[0].resume_text || "";
+          d.job_role = d.job_role || fallback.rows[0].job_title || "";
+          d.jd_text = d.jd_text || fallback.rows[0].jd_text || "";
+        }
+      } catch (e) {
+        console.warn("session-info fallback lookup failed:", e.message);
+      }
+    }
     let asyncQuestions = [];
     if (d.async_questions) {
       try {
@@ -63,6 +87,11 @@ export async function GET(request, { params }) {
       }
     }
 
+    let interviewQuestions = d.interview_questions || [];
+    if (typeof interviewQuestions === "string") {
+      try { interviewQuestions = JSON.parse(interviewQuestions); } catch { interviewQuestions = []; }
+    }
+
     return withCors(NextResponse.json({
       success: true,
       name: d.candidate_name,
@@ -77,7 +106,7 @@ export async function GET(request, { params }) {
       session_token: d.session_token,
       resumed: !!d.last_transcript_snapshot,
       lastTranscript: d.last_transcript_snapshot || null,
-      interview_questions: d.interview_questions || [],
+      interview_questions: interviewQuestions,
       slot_date: slotDateStr,
       slot_time: slotTimeStr,
     }));
