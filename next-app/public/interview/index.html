@@ -44,7 +44,7 @@
       overflow: auto;
       white-space: pre-wrap;
     }
-  </style>
+      .ctrl-btn svg { width: 22px; height: 22px; fill: currentColor; }\n  </style>
 </head>
 <body>
 
@@ -56,7 +56,7 @@
     <ul class="consent-list">
       <li>This interview is conducted by an <strong>AI assistant</strong>, not a human.</li>
       <li>Your <strong>video, audio and screen activity</strong> will be recorded and analyzed.</li>
-      <li>AI-based <strong>proctoring</strong> is active — tab switching and camera-off are monitored.</li>
+      <li>AI-based <strong>proctoring</strong> is active ï¿½ tab switching and camera-off are monitored.</li>
       <li>Data is stored securely and used only for <strong>hiring evaluation</strong>.</li>
     </ul>
   </div>
@@ -150,9 +150,15 @@
 
 <!-- CONTROLS -->
 <div id="controls">
-  <button class="ctrl-btn active" id="micBtn"    title="Mute/Unmute">???</button>
-  <button class="ctrl-btn active" id="camBtn"    title="Camera on/off">??</button>
-  <button class="ctrl-btn danger" id="endBtn"    title="End interview">??</button>
+  <button class="ctrl-btn active" id="micBtn" title="Mute/Unmute" aria-label="Mute or unmute">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2zm-5 9v-3h-2v3h2z"/></svg>
+  </button>
+  <button class="ctrl-btn active" id="camBtn" title="Camera on/off" aria-label="Camera on or off">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 10.5V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3.5l4 4v-11l-4 4z"/></svg>
+  </button>
+  <button class="ctrl-btn danger" id="endBtn" title="End interview" aria-label="End interview">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.51 15.48c1.69-1.69 4.26-2.48 6.99-2.48 2.73 0 5.3.79 6.99 2.48l2.12-2.12C18.13 11.03 14.93 10 11.5 10s-6.63 1.03-9.11 3.36l2.12 2.12z"/></svg>
+  </button>
 </div>
 
 <script>
@@ -187,5 +193,5 @@
   })();
 </script>
 
-</body>
+\n<script>\n  (function wrapRecordingFetch(){\n    const origFetch = window.fetch.bind(window);\n    window.fetch = async function(input, init){\n      const url = typeof input === "string" ? input : (input && input.url) || "";\n      const isChunk = url.includes("/api/recording-chunk");\n      if (!isChunk) return origFetch(input, init);\n\n      let attempt = 0;\n      let lastErr = null;\n      while (attempt < 3) {\n        try {\n          const res = await origFetch(input, init);\n          return res;\n        } catch (e) {\n          lastErr = e;\n          attempt += 1;\n          await new Promise(r => setTimeout(r, 500 * attempt));\n        }\n      }\n      throw lastErr || new Error("recording-chunk failed");\n    };\n  })();\n</script>\n</body>
 </html>

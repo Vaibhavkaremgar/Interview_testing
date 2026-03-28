@@ -10,9 +10,16 @@ export function OPTIONS() {
 }
 
 export async function GET(request, { params }) {
-  const sessionToken = params?.sessionToken || "";
-  if (!sessionToken.trim()) {
-    return withCors(NextResponse.json({ success: false, error: "Session token is required" }, { status: 400 }));
+  const url = new URL(request.url);
+  const tokenFromQuery = url.searchParams.get("session") || url.searchParams.get("sessionToken");
+  const tokenFromPath = params?.sessionToken || url.pathname.split("/").pop();
+  const sessionToken = (tokenFromQuery || tokenFromPath || "").toString().trim();
+  if (!sessionToken) {
+    return withCors(NextResponse.json({
+      success: false,
+      error: "Session token is required",
+      debug: { tokenFromQuery, tokenFromPath, pathname: url.pathname },
+    }, { status: 400 }));
   }
   if (!DB_READY || !pool) {
     return withCors(NextResponse.json({ success: false, error: "Database not available" }, { status: 503 }));
