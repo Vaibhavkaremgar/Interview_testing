@@ -67,6 +67,35 @@ export async function POST(request) {
       let finalJD = jobDescription;
       let finalJobRole = jobRole;
       const finalQuestions = interviewQuestions || async_questions || asyncQuestions || [];
+
+      // If any critical metadata is missing, hydrate from booking token payload.
+      if ((!finalResume || !finalJD || !finalJobRole) && bookingToken) {
+        try {
+          const { rows: tokRows } = await client.query(
+            `SELECT payload, agency_id, candidate_id, job_id, user_id
+             FROM notification_workflow_tokens
+             WHERE token = $1`,
+            [bookingToken]
+          );
+          if (tokRows.length) {
+            let payload = tokRows[0].payload || {};
+            if (typeof payload === "string") {
+              try { payload = JSON.parse(payload); } catch { payload = {}; }
+            }
+            const pick = (obj, keys, fallback = "") => {
+              for (const k of keys) {
+                if (obj && obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== "") return obj[k];
+              }
+              return fallback;
+            };
+            finalResume = finalResume || pick(payload, ["resume_text", "resume", "resumeText"]);
+            finalJD = finalJD || pick(payload, ["job_description", "jobDescription", "jd_text", "jd"]);
+            finalJobRole = finalJobRole || pick(payload, ["job_title", "job_role", "jobRole", "role", "title"]);
+          }
+        } catch (e) {
+          console.warn("booking-token hydrate failed:", e.message);
+        }
+      }
       if (!finalResume || !finalJD) {
         const { rows: cRows } = await client.query(
           `SELECT c.resume_text, c.predefined_questions, c.job_id,

@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
   <script type="module" crossorigin src="/interview/assets/index-BX-hgX_7.js?v=3"></script>
   <link rel="stylesheet" crossorigin href="/interview/assets/index-CRg4NIv9.css?v=3">
-</head>
+\n  <style>\n    #detailsPanel {\n      margin-top: 12px;\n      background: #0f1117;\n      border-top: 1px solid #2a2d3a;\n      padding: 12px 14px;\n      display: none;\n    }\n    #detailsPanel .details-title {\n      font-size: 0.78rem;\n      font-weight: 700;\n      letter-spacing: 0.08em;\n      text-transform: uppercase;\n      color: #94a3b8;\n      margin-bottom: 8px;\n    }\n    #detailsPanel .details-block {\n      margin-bottom: 10px;\n    }\n    #detailsPanel .details-label {\n      font-size: 0.72rem;\n      font-weight: 600;\n      color: #a78bfa;\n      margin-bottom: 4px;\n    }\n    #detailsPanel .details-body {\n      font-size: 0.82rem;\n      color: #cbd5e1;\n      line-height: 1.45;\n      background: #0b0d13;\n      border: 1px solid #1f2430;\n      border-radius: 8px;\n      padding: 8px 10px;\n      max-height: 160px;\n      overflow: auto;\n      white-space: pre-wrap;\n    }\n  </style>\n</head>
 <body>
 
 <!-- CONSENT SCREEN -->
@@ -90,7 +90,7 @@
   <div id="transcriptPanel">
     <h3>📝 Live Transcript</h3>
     <div id="transcriptFeed"></div>
-    <div id="liveIndicator">Waiting for speech...</div>
+    <div id="liveIndicator">Waiting for speech...</div>\n    <div id="detailsPanel">\n      <div class="details-title">Candidate Details</div>\n      <div class="details-block">\n        <div class="details-label">Resume</div>\n        <div class="details-body" id="meetResume">Loading...</div>\n      </div>\n      <div class="details-block">\n        <div class="details-label">Job Description</div>\n        <div class="details-body" id="meetJd">Loading...</div>\n      </div>\n    </div>\n
   </div>
 
 </div>
@@ -102,7 +102,7 @@
   <button class="ctrl-btn danger" id="endBtn"    title="End interview">📵</button>
 </div>
 
-</body>
+\n<script>\n  (async function hydrateInterviewDetails() {\n    try {\n      const session = new URLSearchParams(window.location.search).get("session");\n      if (!session) return;\n      const res = await fetch(`/api/session-info/${encodeURIComponent(session)}`);\n      if (!res.ok) return;\n      const data = await res.json();\n      if (!data || !data.success) return;\n\n      const resume = (data.resume_text || "").trim();\n      const jd = (data.job_description || "").trim();\n      if (!resume && !jd) return;\n\n      document.getElementById("detailsPanel").style.display = "block";\n      document.getElementById("meetResume").textContent = resume || "Not provided";\n      document.getElementById("meetJd").textContent = jd || "Not provided";\n    } catch (e) {}\n  })();\n</script>\n</body>
 </html>
 
 
