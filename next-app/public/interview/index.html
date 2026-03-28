@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pontis AI Interview</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+  <script type="module" crossorigin src="/interview/assets/index-BX-hgX_7.js"></script>
+  <link rel="stylesheet" crossorigin href="/interview/assets/index-CRg4NIv9.css">
+</head>
+<body>
+
+<!-- CONSENT SCREEN -->
+<div id="consentScreen">
+  <div class="consent-logo">Pontis AI Interview</div>
+  <div class="consent-body">
+    Before you begin, please read and agree to the following:
+    <ul class="consent-list">
+      <li>This interview is conducted by an <strong>AI assistant</strong>, not a human.</li>
+      <li>Your <strong>video, audio and screen activity</strong> will be recorded and analyzed.</li>
+      <li>AI-based <strong>proctoring</strong> is active — tab switching and camera-off are monitored.</li>
+      <li>Data is stored securely and used only for <strong>hiring evaluation</strong>.</li>
+    </ul>
+  </div>
+  <button id="consentBtn">I Agree &amp; Continue</button>
+</div>
+
+<!-- STATUS OVERLAY -->
+<div id="statusOverlay">
+  <div class="logo-big">Pontis</div>
+  <div class="spinner"></div>
+  <p id="statusText">Requesting camera access...</p>
+</div>
+
+<!-- PERMISSION ERROR -->
+<div id="permError">
+  <h2>📷 Camera / Mic Blocked</h2>
+  <p>Please allow camera and microphone access in your browser settings, then refresh the page.</p>
+  <button onclick="location.reload()">Retry</button>
+</div>
+
+<!-- ENDED SCREEN -->
+<div id="endedScreen">
+  <h2>Interview Complete</h2>
+  <p>Thank you for your time. We'll be in touch soon.</p>
+  <p id="endedName" style="color:#a78bfa;font-weight:600"></p>
+</div>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="logo">Pontis AI Interview</div>
+  <div class="call-info" id="callInfo">Connecting...</div>
+  <div id="timer">00:00</div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- VIDEO TILES -->
+  <div id="videoArea">
+
+    <!-- AI AGENT TILE -->
+    <div class="tile" id="agentTile">
+      <div class="cam-off-overlay">
+        <div class="tile-avatar" id="agentAvatar">AI</div>
+      </div>
+
+      <div class="tile-label">
+        <span>Pontis AI Interviewer</span>
+        <span class="mic-icon" id="agentMicIcon">🎙️</span>
+      </div>
+    </div>
+
+    <!-- CANDIDATE TILE -->
+    <div class="tile" id="candidateTile">
+      <div class="cam-off-overlay" id="camOffOverlay">
+        <div class="tile-avatar" id="candidateAvatar">?</div>
+        <span style="font-size:0.8rem;color:#64748b">Camera off</span>
+      </div>
+      <video id="candidateVideo" autoplay muted playsinline style="display:none"></video>
+      <div class="tile-label">
+        <span id="candidateLabel">You</span>
+        <span class="mic-icon" id="candidateMicIcon">🎙️</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- TRANSCRIPT PANEL -->
+  <div id="transcriptPanel">
+    <h3>📝 Live Transcript</h3>
+    <div id="transcriptFeed"></div>
+    <div id="liveIndicator">Waiting for speech...</div>
+  </div>
+
+</div>
+
+<!-- CONTROLS -->
+<div id="controls">
+  <button class="ctrl-btn active" id="micBtn"    title="Mute/Unmute">🎙️</button>
+  <button class="ctrl-btn active" id="camBtn"    title="Camera on/off">📷</button>
+  <button class="ctrl-btn danger" id="endBtn"    title="End interview">📵</button>
+</div>
+
+</body>
+</html>
