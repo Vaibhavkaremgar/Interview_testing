@@ -113,6 +113,7 @@ export async function POST(request) {
         ]
       );
       sessionId = sr[0].id;
+      sessionToken = sr[0].session_token || sessionToken;
 
       const scheduledAt = new Date(`${slotDate}T${slotTime}:00`);
       const interviewLink = buildInterviewLink(sessionToken);
@@ -140,6 +141,7 @@ export async function POST(request) {
     slotDate = slot_id.split("-").slice(1, 4).join("-");
     slotTime = slot_id.split("-")[4]?.replace(/(\d{2})(\d{2})/, "$1:$2") || "09:00";
     sessionId = uuidv4();
+    sessionToken = sessionId;
   }
 
   const interviewLink = buildInterviewLink(sessionToken || sessionId);
@@ -149,6 +151,7 @@ export async function POST(request) {
     success: true,
     message: "Slot booked successfully",
     session_id: sessionId,
+    session_token: sessionToken || sessionId,
     interview_link: interviewLink,
     slot_date: slotDate,
     slot_time: slotTime,
