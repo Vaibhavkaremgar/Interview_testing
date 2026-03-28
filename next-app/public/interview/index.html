@@ -4,10 +4,48 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pontis AI Interview</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
-  <script type="module" crossorigin src="/interview/assets/index-BX-hgX_7.js?v=3"></script>
-  <link rel="stylesheet" crossorigin href="/interview/assets/index-CRg4NIv9.css?v=3">
-\n  <style>\n    #detailsPanel {\n      margin-top: 12px;\n      background: #0f1117;\n      border-top: 1px solid #2a2d3a;\n      padding: 12px 14px;\n      display: none;\n    }\n    #detailsPanel .details-title {\n      font-size: 0.78rem;\n      font-weight: 700;\n      letter-spacing: 0.08em;\n      text-transform: uppercase;\n      color: #94a3b8;\n      margin-bottom: 8px;\n    }\n    #detailsPanel .details-block {\n      margin-bottom: 10px;\n    }\n    #detailsPanel .details-label {\n      font-size: 0.72rem;\n      font-weight: 600;\n      color: #a78bfa;\n      margin-bottom: 4px;\n    }\n    #detailsPanel .details-body {\n      font-size: 0.82rem;\n      color: #cbd5e1;\n      line-height: 1.45;\n      background: #0b0d13;\n      border: 1px solid #1f2430;\n      border-radius: 8px;\n      padding: 8px 10px;\n      max-height: 160px;\n      overflow: auto;\n      white-space: pre-wrap;\n    }\n  </style>\n</head>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>???</text></svg>">
+  <script type="module" crossorigin src="/interview/assets/index-BX-hgX_7.js?v=4"></script>
+  <link rel="stylesheet" crossorigin href="/interview/assets/index-CRg4NIv9.css?v=4">
+  <style>
+    #detailsPanel {
+      margin-top: 12px;
+      background: #0f1117;
+      border-top: 1px solid #2a2d3a;
+      padding: 12px 14px;
+      display: none;
+    }
+    #detailsPanel .details-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    #detailsPanel .details-block {
+      margin-bottom: 10px;
+    }
+    #detailsPanel .details-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #a78bfa;
+      margin-bottom: 4px;
+    }
+    #detailsPanel .details-body {
+      font-size: 0.82rem;
+      color: #cbd5e1;
+      line-height: 1.45;
+      background: #0b0d13;
+      border: 1px solid #1f2430;
+      border-radius: 8px;
+      padding: 8px 10px;
+      max-height: 160px;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
 <body>
 
 <!-- CONSENT SCREEN -->
@@ -18,7 +56,7 @@
     <ul class="consent-list">
       <li>This interview is conducted by an <strong>AI assistant</strong>, not a human.</li>
       <li>Your <strong>video, audio and screen activity</strong> will be recorded and analyzed.</li>
-      <li>AI-based <strong>proctoring</strong> is active — tab switching and camera-off are monitored.</li>
+      <li>AI-based <strong>proctoring</strong> is active � tab switching and camera-off are monitored.</li>
       <li>Data is stored securely and used only for <strong>hiring evaluation</strong>.</li>
     </ul>
   </div>
@@ -34,7 +72,7 @@
 
 <!-- PERMISSION ERROR -->
 <div id="permError">
-  <h2>📷 Camera / Mic Blocked</h2>
+  <h2>?? Camera / Mic Blocked</h2>
   <p>Please allow camera and microphone access in your browser settings, then refresh the page.</p>
   <button onclick="location.reload()">Retry</button>
 </div>
@@ -67,7 +105,7 @@
 
       <div class="tile-label">
         <span>Pontis AI Interviewer</span>
-        <span class="mic-icon" id="agentMicIcon">🎙️</span>
+        <span class="mic-icon" id="agentMicIcon">???</span>
       </div>
     </div>
 
@@ -80,7 +118,7 @@
       <video id="candidateVideo" autoplay muted playsinline style="display:none"></video>
       <div class="tile-label">
         <span id="candidateLabel">You</span>
-        <span class="mic-icon" id="candidateMicIcon">🎙️</span>
+        <span class="mic-icon" id="candidateMicIcon">???</span>
       </div>
     </div>
 
@@ -88,21 +126,66 @@
 
   <!-- TRANSCRIPT PANEL -->
   <div id="transcriptPanel">
-    <h3>📝 Live Transcript</h3>
+    <h3>?? Live Transcript</h3>
     <div id="transcriptFeed"></div>
-    <div id="liveIndicator">Waiting for speech...</div>\n    <div id="detailsPanel">\n      <div class="details-title">Candidate Details</div>\n      <div class="details-block">\n        <div class="details-label">Resume</div>\n        <div class="details-body" id="meetResume">Loading...</div>\n      </div>\n      <div class="details-block">\n        <div class="details-label">Job Description</div>\n        <div class="details-body" id="meetJd">Loading...</div>\n      </div>\n    </div>\n
+    <div id="liveIndicator">Waiting for speech...</div>
+    <div id="detailsPanel">
+      <div class="details-title">Candidate Details</div>
+      <div class="details-block">
+        <div class="details-label">Session</div>
+        <div class="details-body" id="meetSession">Missing session in URL</div>
+      </div>
+      <div class="details-block">
+        <div class="details-label">Resume</div>
+        <div class="details-body" id="meetResume">Loading...</div>
+      </div>
+      <div class="details-block">
+        <div class="details-label">Job Description</div>
+        <div class="details-body" id="meetJd">Loading...</div>
+      </div>
+    </div>
   </div>
 
 </div>
 
 <!-- CONTROLS -->
 <div id="controls">
-  <button class="ctrl-btn active" id="micBtn"    title="Mute/Unmute">🎙️</button>
-  <button class="ctrl-btn active" id="camBtn"    title="Camera on/off">📷</button>
-  <button class="ctrl-btn danger" id="endBtn"    title="End interview">📵</button>
+  <button class="ctrl-btn active" id="micBtn"    title="Mute/Unmute">???</button>
+  <button class="ctrl-btn active" id="camBtn"    title="Camera on/off">??</button>
+  <button class="ctrl-btn danger" id="endBtn"    title="End interview">??</button>
 </div>
 
-\n<script>\n  (async function hydrateInterviewDetails() {\n    try {\n      const session = new URLSearchParams(window.location.search).get("session");\n      if (session) document.getElementById("meetSession").textContent = session;\n      if (!session) {\n        document.getElementById("detailsPanel").style.display = "block";\n        document.getElementById("meetResume").textContent = "No session token in URL";\n        document.getElementById("meetJd").textContent = "Open the interview link that includes ?session=...";\n        return;\n      }\n      if (!session) return;\n      const res = await fetch(`/api/session-info/${encodeURIComponent(session)}`);\n      if (!res.ok) {\n        document.getElementById("detailsPanel").style.display = "block";\n        document.getElementById("meetResume").textContent = "Session lookup failed (" + res.status + ")";\n        document.getElementById("meetJd").textContent = "Check /api/session-info response";\n        return;\n      }\n      if (!res.ok) return;\n      const data = await res.json();\n      if (!data || !data.success) return;\n\n      const resume = (data.resume_text || "").trim();\n      const jd = (data.job_description || "").trim();\n      if (!resume && !jd) return;\n\n      document.getElementById("detailsPanel").style.display = "block";\n      document.getElementById("meetResume").textContent = resume || "Not provided";\n      document.getElementById("meetJd").textContent = jd || "Not provided";\n    } catch (e) {}\n  })();\n</script>\n</body>
+<script>
+  (async function hydrateInterviewDetails() {
+    try {
+      const session = new URLSearchParams(window.location.search).get("session");
+      document.getElementById("detailsPanel").style.display = "block";
+      if (session) {
+        document.getElementById("meetSession").textContent = session;
+      } else {
+        document.getElementById("meetResume").textContent = "No session token in URL";
+        document.getElementById("meetJd").textContent = "Open the interview link that includes ?session=...";
+        return;
+      }
+
+      const res = await fetch(`/api/session-info/${encodeURIComponent(session)}`);
+      if (!res.ok) {
+        document.getElementById("meetResume").textContent = "Session lookup failed (" + res.status + ")";
+        document.getElementById("meetJd").textContent = "Check /api/session-info response";
+        return;
+      }
+      const data = await res.json();
+      if (!data || !data.success) return;
+
+      const resume = (data.resume_text || "").trim();
+      const jd = (data.job_description || "").trim();
+      if (!resume && !jd) return;
+
+      document.getElementById("meetResume").textContent = resume || "Not provided";
+      document.getElementById("meetJd").textContent = jd || "Not provided";
+    } catch (e) {}
+  })();
+</script>
+
+</body>
 </html>
-
-

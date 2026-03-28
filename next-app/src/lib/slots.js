@@ -192,7 +192,15 @@ async function sendConfirmationEmail(name, email, date, time, interviewLink) {
 
 function buildInterviewLink(sessionToken) {
   const params = new URLSearchParams({ session: sessionToken });
-  return `${FRONTEND_INTERVIEW_URL}?${params.toString()}`;
+  const base = (FRONTEND_INTERVIEW_URL || "").trim();
+  if (!base) return `?${params.toString()}`;
+
+  // Normalize to avoid redirect losing query params.
+  let url = base;
+  if (url.endsWith("/")) url = url.slice(0, -1);
+  if (url.endsWith("/interview")) url = `${url}/index.html`;
+
+  return `${url}?${params.toString()}`;
 }
 
 export {
