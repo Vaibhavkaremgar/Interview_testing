@@ -315,9 +315,6 @@
       <span style="opacity:0.6">&middot;</span>
       <span id="badgeEmail" style="opacity:0.85"></span>
     </div>
-    <div class="token-badge" id="tokenBadge" style="display:none">
-      Token: <span id="tokenValue"></span>
-    </div>
   </div>
 
   <!-- MANUAL FIELDS (shown only if name/email not in URL) -->
@@ -326,20 +323,6 @@
     <input type="email" id="emailInput" placeholder="Your email address" />
   </div>
 
-  <!-- RECEIVED DETAILS -->
-  <div class="details" id="detailsBox" style="display:none">
-    <div class="details-title">Received Details</div>
-    <div class="details-grid">
-      <div>
-        <div class="details-label">Resume</div>
-        <pre class="details-pre" id="resumePreview"></pre>
-      </div>
-      <div>
-        <div class="details-label">Job Description</div>
-        <pre class="details-pre" id="jdPreview"></pre>
-      </div>
-    </div>
-  </div>
 
   <!-- BODY -->
   <div class="body">
@@ -410,8 +393,6 @@ const MONTHS = ["January","February","March","April","May","June",
 
 async function init() {
   if (token) {
-    document.getElementById("tokenBadge").style.display = "inline-flex";
-    document.getElementById("tokenValue").textContent = token;
     try {
       const res  = await fetch(`/api/booking-token/${encodeURIComponent(token)}`);
       const data = await res.json();
@@ -435,17 +416,7 @@ async function init() {
     if (cfg.email) document.getElementById("emailInput").value = cfg.email;
   }
 
-  renderDetails();
   await loadSlots();
-}
-
-function renderDetails() {
-  const resume = (cfg.resume || "").trim();
-  const jd = (cfg.jobDescription || "").trim();
-  if (!resume && !jd) return;
-  document.getElementById("detailsBox").style.display = "block";
-  document.getElementById("resumePreview").textContent = resume || "Not provided";
-  document.getElementById("jdPreview").textContent = jd || "Not provided";
 }
 
 async function loadSlots() {

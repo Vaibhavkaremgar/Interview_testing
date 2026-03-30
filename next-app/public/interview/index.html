@@ -8,42 +8,6 @@
   <script type="module" crossorigin src="/interview/assets/index-BX-hgX_7.js?v=4"></script>
   <link rel="stylesheet" crossorigin href="/interview/assets/index-CRg4NIv9.css?v=4">
   <style>
-    #detailsPanel {
-      margin-top: 12px;
-      background: #0f1117;
-      border-top: 1px solid #2a2d3a;
-      padding: 12px 14px;
-      display: none;
-    }
-    #detailsPanel .details-title {
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #94a3b8;
-      margin-bottom: 8px;
-    }
-    #detailsPanel .details-block {
-      margin-bottom: 10px;
-    }
-    #detailsPanel .details-label {
-      font-size: 0.72rem;
-      font-weight: 600;
-      color: #a78bfa;
-      margin-bottom: 4px;
-    }
-    #detailsPanel .details-body {
-      font-size: 0.82rem;
-      color: #cbd5e1;
-      line-height: 1.45;
-      background: #0b0d13;
-      border: 1px solid #1f2430;
-      border-radius: 8px;
-      padding: 8px 10px;
-      max-height: 160px;
-      overflow: auto;
-      white-space: pre-wrap;
-    }
     .ctrl-btn svg { width: 22px; height: 22px; fill: currentColor; }
   </style>
 </head>
@@ -134,21 +98,6 @@
     <h3>Live Transcript</h3>
     <div id="transcriptFeed"></div>
     <div id="liveIndicator">Waiting for speech...</div>
-    <div id="detailsPanel">
-      <div class="details-title">Candidate Details</div>
-      <div class="details-block">
-        <div class="details-label">Session</div>
-        <div class="details-body" id="meetSession">Missing session in URL</div>
-      </div>
-      <div class="details-block">
-        <div class="details-label">Resume</div>
-        <div class="details-body" id="meetResume">Loading...</div>
-      </div>
-      <div class="details-block">
-        <div class="details-label">Job Description</div>
-        <div class="details-body" id="meetJd">Loading...</div>
-      </div>
-    </div>
   </div>
 
 </div>
@@ -165,38 +114,6 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.51 15.48c1.69-1.69 4.26-2.48 6.99-2.48 2.73 0 5.3.79 6.99 2.48l2.12-2.12C18.13 11.03 14.93 10 11.5 10s-6.63 1.03-9.11 3.36l2.12 2.12z"/></svg>
   </button>
 </div>
-
-<script>
-  (async function hydrateInterviewDetails() {
-    try {
-      const session = new URLSearchParams(window.location.search).get("session");
-      document.getElementById("detailsPanel").style.display = "block";
-      if (session) {
-        document.getElementById("meetSession").textContent = session;
-      } else {
-        document.getElementById("meetResume").textContent = "No session token in URL";
-        document.getElementById("meetJd").textContent = "Open the interview link that includes ?session=...";
-        return;
-      }
-
-      const res = await fetch(`/api/session-info/${encodeURIComponent(session)}`);
-      if (!res.ok) {
-        document.getElementById("meetResume").textContent = "Session lookup failed (" + res.status + ")";
-        document.getElementById("meetJd").textContent = "Check /api/session-info response";
-        return;
-      }
-      const data = await res.json();
-      if (!data || !data.success) return;
-
-      const resume = (data.resume_text || "").trim();
-      const jd = (data.job_description || "").trim();
-      if (!resume && !jd) return;
-
-      document.getElementById("meetResume").textContent = resume || "Not provided";
-      document.getElementById("meetJd").textContent = jd || "Not provided";
-    } catch (e) {}
-  })();
-</script>
 
 <script>
   (function wrapRecordingFetch() {
