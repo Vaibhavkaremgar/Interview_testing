@@ -80,12 +80,30 @@ export async function POST(request) {
   const chunkIndexRaw = (formData.get("chunkIndex") || "").toString();
   const isFinal = (formData.get("final") || "").toString() === "1";
 
+  console.log("=== RECORDING CHUNK POST ===");
+  console.log("Current working directory:", process.cwd());
+  console.log("Session token:", sessionToken);
+  console.log("Chunk index:", chunkIndexRaw);
+  console.log("Is final:", isFinal);
+
   if (!sessionToken) {
     return withCors(NextResponse.json({ success: false, message: "Invalid session" }, { status: 400 }));
   }
 
   const recordingsDir = path.join(process.cwd(), "recordings");
-  if (!fs.existsSync(recordingsDir)) fs.mkdirSync(recordingsDir);
+  console.log("Recordings directory path:", recordingsDir);
+  
+  try {
+    if (!fs.existsSync(recordingsDir)) {
+      console.log("Creating recordings directory...");
+      fs.mkdirSync(recordingsDir);
+      console.log("Recordings directory created successfully");
+    } else {
+      console.log("Recordings directory already exists");
+    }
+  } catch (err) {
+    console.error("ERROR creating recordings directory:", err.message);
+  }
 
   const webmFilename = `${sessionToken}.webm`;
   const mp4Filename = `${sessionToken}.mp4`;
@@ -112,16 +130,29 @@ export async function POST(request) {
       return withCors(NextResponse.json({ success: false, message: "Missing chunk index" }, { status: 400 }));
     }
     const partPath = path.join(partsDir, `chunk-${idx}.webm`);
-    fs.writeFileSync(partPath, buffer);
+    console.log(`Writing chunk ${idx} to:`, partPath);
+    console.log(`Chunk buffer size: ${buffer.length} bytes`);
+    try {
+      fs.writeFileSync(partPath, buffer);
+      console.log(`✓ Chunk ${idx} written successfully`);
+    } catch (err) {
+      console.error(`✗ ERROR writing chunk ${idx}:`, err.message);
+      throw err;
+    }
   }
 
   // Append any contiguous chunks in order to the single file.
   const state = loadState();
+  console.log(`Current state - nextIndex: ${state.nextIndex}`);
   let appendedBytes = 0;
   let appendedChunks = 0;
   while (true) {
     const partPath = path.join(partsDir, `chunk-${state.nextIndex}.webm`);
-    if (!fs.existsSync(partPath)) break;
+    if (!fs.existsSync(partPath)) {
+      console.log(`No chunk found at index ${state.nextIndex}, stopping assembly`);
+      break;
+    }
+    console.log(`Assembling chunk ${state.nextIndex} into main file`);
     const buf = fs.readFileSync(partPath);
     fs.appendFileSync(webmPath, buf);
     fs.unlinkSync(partPath);
@@ -130,6 +161,7 @@ export async function POST(request) {
     state.nextIndex += 1;
     saveState(state);
   }
+  console.log(`Assembly complete: ${appendedChunks} chunks, ${appendedBytes} bytes appended`);
 
   let converted = false;
   let finalFormat = null;
@@ -141,6 +173,10 @@ export async function POST(request) {
     let finalFormat = 'webm';
     let duration = 0;
 
+    const webmStats = fs.statSync(webmPath);
+    console.log(`WebM file exists: ${webmPath}`);
+    console.log(`WebM file size: ${webmStats.size} bytes`);
+
     try {
       console.log(`Attempting to convert ${webmPath} to ${mp4Path}`);
       await convertToMp4(webmPath, mp4Path);
@@ -151,13 +187,14 @@ export async function POST(request) {
         finalPath = mp4Path;
         finalFormat = 'mp4';
         converted = true;
-        console.log(`Converted recording: ${stats.size} bytes, ${duration}s duration`);
+        console.log(`✓ Converted recording: ${stats.size} bytes, ${duration}s duration`);
         
         // Clean up WebM file
         fs.unlinkSync(webmPath);
+        console.log("✓ WebM file cleaned up");
       }
     } catch (e) {
-      console.warn("FFmpeg conversion failed, keeping WebM format:", e.message);
+      console.warn("⚠ FFmpeg conversion failed, keeping WebM format:", e.message);
       // Keep WebM format if conversion fails
       const stats = fs.statSync(webmPath);
       duration = await getVideoDuration(webmPath);
@@ -166,6 +203,7 @@ export async function POST(request) {
     }
     
     if (converted) {
+      console.log(`Updating database with ${finalFormat} recording`);
       if (DB_READY && pool) {
         await pool.query(
           `UPDATE interview_sessions
@@ -177,14 +215,19 @@ export async function POST(request) {
            WHERE session_token = $5`,
           [`recordings/${path.basename(finalPath)}`, fs.statSync(finalPath).size, duration, finalFormat, sessionToken]
         );
+        console.log("✓ Database updated successfully");
       }
     }
     
     // Clean up parts directory
     if (fs.existsSync(partsDir)) {
       fs.rmSync(partsDir, { recursive: true, force: true });
+      console.log("✓ Parts directory cleaned up");
     }
     if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+  } else if (isFinal) {
+    console.warn("⚠ isFinal=true but webm file does not exist at:", webmPath);
+    console.log("Recording files in directory:", fs.readdirSync(recordingsDir));
   }
 
   return withCors(NextResponse.json({
