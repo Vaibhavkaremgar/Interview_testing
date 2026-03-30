@@ -110,7 +110,7 @@ async function sendConfirmationEmail(name, email, date, time, interviewLink) {
   const displayTime = formatTimeFull(time);
 
   await resend.emails.send({
-    from: "Pontis Interviews <onboarding@resend.dev>",
+    from: "Pontis Interviews <info@pontis.one>",
     to: email,
     subject: `Your Interview is Confirmed ${displayDate}`,
     html: `<!DOCTYPE html>
