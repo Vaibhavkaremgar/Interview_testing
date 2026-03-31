@@ -204,18 +204,52 @@ export async function POST(request) {
     
     if (converted) {
       console.log(`Updating database with ${finalFormat} recording`);
+      const buffer = fs.readFileSync(finalPath);
+      console.log(`Read buffer of ${buffer.length} bytes`);
       if (DB_READY && pool) {
+        console.log(`DB is ready, updating session ${sessionToken}`);
         await pool.query(
           `UPDATE interview_sessions
            SET recording_path = $1,
                recording_size_bytes = $2,
                recording_duration_seconds = $3,
                recording_format = $4,
+               recording_data = $5,
                recording_created_at = NOW()
-           WHERE session_token = $5`,
-          [`recordings/${path.basename(finalPath)}`, fs.statSync(finalPath).size, duration, finalFormat, sessionToken]
+           WHERE session_token = $6`,
+          [path.basename(finalPath), buffer.length, duration, finalFormat, buffer, sessionToken]
         );
         console.log("✓ Database updated successfully");
+      } else {
+        console.log("DB not ready or pool null");
+      }
+      // Clean up the file since data is in DB
+      fs.unlinkSync(finalPath);
+      console.log("✓ File cleaned up after DB storage");
+    } else {
+      console.log("MP4 conversion failed, trying to store WebM");
+      if (fs.existsSync(webmPath)) {
+        const buffer = fs.readFileSync(webmPath);
+        const duration = await getVideoDuration(webmPath);
+        console.log(`Storing WebM buffer of ${buffer.length} bytes`);
+        if (DB_READY && pool) {
+          await pool.query(
+            `UPDATE interview_sessions
+             SET recording_path = $1,
+                 recording_size_bytes = $2,
+                 recording_duration_seconds = $3,
+                 recording_format = $4,
+                 recording_data = $5,
+                 recording_created_at = NOW()
+             WHERE session_token = $6`,
+            [path.basename(webmPath), buffer.length, duration, 'webm', buffer, sessionToken]
+          );
+          console.log("✓ Database updated with WebM");
+        }
+        fs.unlinkSync(webmPath);
+        console.log("✓ WebM file cleaned up");
+      } else {
+        console.log("No WebM file to store");
       }
     }
     

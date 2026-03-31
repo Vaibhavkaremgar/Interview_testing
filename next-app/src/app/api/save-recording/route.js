@@ -27,7 +27,7 @@ export async function POST(request) {
   const buffer = Buffer.from(await file.arrayBuffer());
   fs.writeFileSync(fullPath, buffer);
 
-  const relativePath = `recordings/${filename}`;
+  const relativePath = filename;
   const sizeBytes = buffer.length;
 
   if (sessionToken && DB_READY && pool) {

@@ -53,18 +53,36 @@ export async function GET(request, { params }) {
 
   try {
     const { rows } = await pool.query(
-      `SELECT recording_path, recording_size_bytes, recording_format, recording_duration_seconds
+      `SELECT recording_path, recording_size_bytes, recording_format, recording_duration_seconds, recording_data
        FROM interview_sessions
        WHERE session_token = $1`,
       [sessionToken]
     );
 
-    if (!rows.length || !rows[0].recording_path) {
+    if (!rows.length || (!rows[0].recording_path && !rows[0].recording_data)) {
       return withCors(NextResponse.json({ error: "Recording not found" }, { status: 404 }));
     }
 
-    const { recording_path, recording_size_bytes, recording_format, recording_duration_seconds } = rows[0];
-    const fullPath = path.join(process.cwd(), recording_path);
+    const { recording_path, recording_size_bytes, recording_format, recording_duration_seconds, recording_data } = rows[0];
+
+    // If data is stored in DB, serve from there
+    if (recording_data) {
+      const headers = new Headers();
+      headers.set("Content-Type", recording_format === "mp4" ? "video/mp4" : "video/webm");
+      headers.set("Accept-Ranges", "bytes");
+      headers.set("Content-Length", recording_data.length.toString());
+
+      if (recording_duration_seconds) {
+        headers.set("X-Duration-Seconds", recording_duration_seconds.toString());
+      }
+
+      applyCors(headers);
+
+      return new Response(recording_data, { headers });
+    }
+
+    // Fallback: serve from file (for older recordings)
+    const fullPath = path.join(process.cwd(), "recordings", recording_path);
 
     if (!fs.existsSync(fullPath)) {
       return withCors(NextResponse.json({ error: "Recording file not found" }, { status: 404 }));
