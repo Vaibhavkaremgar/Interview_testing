@@ -5,6 +5,15 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 const sessions = {};
 
+function normalizeRole(role) {
+  return (role || "").toString().trim().toLowerCase();
+}
+
+function isTranscriptRoleAllowed(role) {
+  const r = normalizeRole(role);
+  return r === "user" || r === "assistant" || r === "bot";
+}
+
 function getSession(callId) {
   if (!sessions[callId]) {
     sessions[callId] = {
@@ -216,7 +225,9 @@ async function processWebhook(body) {
     if (messageType === "transcript") {
       const role = body?.message?.role || "unknown";
       const text = body?.message?.transcript || "";
-      if (text.trim()) session.conversationHistory.push({ role, content: text });
+      if (text.trim() && isTranscriptRoleAllowed(role)) {
+        session.conversationHistory.push({ role, content: text });
+      }
       return;
     }
 
@@ -224,9 +235,11 @@ async function processWebhook(body) {
       const vapiMessages = body?.message?.artifact?.messages || [];
       const transcript = vapiMessages.length
         ? vapiMessages
-            .filter(m => m.message && m.message.trim().length > 0)
-            .map(m => `${m.role.toUpperCase()}: ${m.message}`).join("\n\n")
-        : session.conversationHistory.map(e => `${e.role.toUpperCase()}: ${e.content}`).join("\n\n");
+            .filter(m => m.message && m.message.trim().length > 0 && isTranscriptRoleAllowed(m.role))
+            .map(m => `${normalizeRole(m.role).toUpperCase()}: ${m.message}`).join("\n\n")
+        : session.conversationHistory
+            .filter(e => isTranscriptRoleAllowed(e.role))
+            .map(e => `${normalizeRole(e.role).toUpperCase()}: ${e.content}`).join("\n\n");
 
       const asyncToken =
         body?.message?.call?.assistantOverrides?.variableValues?.session ||
