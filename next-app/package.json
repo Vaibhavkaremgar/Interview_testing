@@ -1,24 +1,28 @@
 {
-    "name":  "next-app",
-    "version":  "0.1.0",
-    "private":  true,
+    "name": "next-app",
+    "version": "0.1.0",
+    "private": true,
     "type": "module",
-    "scripts":  {
-                    "dev":  "next dev",
-                    "build":  "next build",
-                    "start":  "next start",
-                    "lint":  "eslint"
-                },
-    "dependencies":  {
-                         "next":  "16.2.1",
-                         "react":  "19.2.4",
-                         "react-dom":  "19.2.4",
-                         "pg":  "^8.20.0",
-                         "resend":  "^6.9.4",
-                         "uuid":  "^9.0.0"
-                     },
-    "devDependencies":  {
-                            "eslint":  "^9",
-                            "eslint-config-next":  "16.2.1"
-                        }
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "eslint"
+    },
+    "dependencies": {
+        "@vapi-ai/web": "^2.5.2",
+        "@tensorflow-models/face-landmarks-detection": "^1.0.6",
+        "@tensorflow/tfjs-backend-webgl": "^4.22.0",
+        "@tensorflow/tfjs-core": "^4.22.0",
+        "next": "16.2.1",
+        "pg": "^8.20.0",
+        "react": "19.2.4",
+        "react-dom": "19.2.4",
+        "resend": "^6.9.4",
+        "uuid": "^9.0.0"
+    },
+    "devDependencies": {
+        "eslint": "^9",
+        "eslint-config-next": "16.2.1"
+    }
 }

@@ -17,7 +17,7 @@ function parseRange(rangeHeader, fileSize) {
 
   const ranges = rangeHeader.substring(6).split(",");
   if (ranges.length !== 1) {
-    return null; // Multiple ranges not supported
+    return null;
   }
 
   const range = ranges[0].trim();
@@ -30,11 +30,9 @@ function parseRange(rangeHeader, fileSize) {
   let end = parseInt(parts[1], 10);
 
   if (isNaN(start)) {
-    // Suffix-byte-range-spec
     start = fileSize - end;
     end = fileSize - 1;
   } else if (isNaN(end)) {
-    // Open-ended range
     end = fileSize - 1;
   }
 
@@ -65,7 +63,6 @@ export async function GET(request, { params }) {
 
     const { recording_path, recording_size_bytes, recording_format, recording_duration_seconds, recording_data } = rows[0];
 
-    // If data is stored in DB, serve from there
     if (recording_data) {
       const headers = new Headers();
       headers.set("Content-Type", recording_format === "mp4" ? "video/mp4" : "video/webm");
@@ -81,7 +78,6 @@ export async function GET(request, { params }) {
       return new Response(recording_data, { headers });
     }
 
-    // Fallback: serve from file (for older recordings)
     const fullPath = path.join(process.cwd(), "recordings", recording_path);
 
     if (!fs.existsSync(fullPath)) {
@@ -103,7 +99,6 @@ export async function GET(request, { params }) {
 
     applyCors(headers);
 
-    // Handle range requests for streaming
     if (rangeHeader) {
       const range = parseRange(rangeHeader, fileSize);
       if (range) {
@@ -121,7 +116,6 @@ export async function GET(request, { params }) {
       }
     }
 
-    // Serve entire file
     const stream = fs.createReadStream(fullPath);
     return new Response(stream, { headers });
 

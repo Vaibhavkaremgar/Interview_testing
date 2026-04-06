@@ -373,6 +373,7 @@ const cfg = {
   userId:        p.get("userId")         || p.get("user_id")     || "",
   jobId:         p.get("jobId")          || p.get("job_id")      || "",
   candidateId:   p.get("candidateId")    || p.get("candidate_id")|| "",
+  interviewQuestions: [],
 };
 
 function localDateStr(d) {
@@ -386,6 +387,7 @@ let selectedDate = null;
 let selectedSlot = null;
 let viewYear     = new Date().getFullYear();
 let viewMonth    = new Date().getMonth();
+let serverTodayStr = localDateStr(new Date());
 
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const MONTHS = ["January","February","March","April","May","June",
@@ -402,6 +404,7 @@ async function init() {
         cfg.jobRole = data.job_title; cfg.agencyId = data.agency_id;
         cfg.candidateId = data.candidate_id; cfg.jobId = data.job_id;
         cfg.userId = data.user_id;
+        cfg.interviewQuestions = data.interview_questions || data.async_questions || data.asyncQuestions || [];
       } else { showStatus(data.error || "Invalid booking link", "error"); }
     } catch(e) { showStatus("Failed to load booking details", "error"); }
   }
@@ -424,6 +427,8 @@ async function loadSlots() {
     const res  = await fetch("/api/available-slots");
     const data = await res.json();
     if (!data.success) throw new Error(data.error || "Failed to load slots");
+    const serverNow = data.server_now_iso ? new Date(data.server_now_iso) : new Date();
+    serverTodayStr = data.server_date || localDateStr(serverNow);
 
     slotsByDate = {};
     for (const s of data.slots) {
@@ -431,8 +436,7 @@ async function loadSlots() {
       slotsByDate[s.slot_date].push(s);
     }
     renderCalendar();
-    const todayStr = localDateStr(new Date());
-    if (slotsByDate[todayStr]) selectDate(todayStr);
+    if (slotsByDate[serverTodayStr]) selectDate(serverTodayStr);
   } catch (e) {
     showStatus("Failed to load slots: " + e.message, "error");
   }
@@ -452,8 +456,6 @@ function renderCalendar() {
 
   const firstDay    = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const todayStr    = localDateStr(new Date());
-
   for (let i = 0; i < firstDay; i++) {
     const el = document.createElement("div");
     el.className = "cal-day empty";
@@ -469,8 +471,8 @@ function renderCalendar() {
     el.className   = "cal-day";
     el.textContent = d;
 
-    const isPast   = dateStr < todayStr;
-    const isToday  = dateStr === todayStr;
+    const isPast   = dateStr < serverTodayStr;
+    const isToday  = dateStr === serverTodayStr;
     const hasSlots = !!slotsByDate[dateStr];
 
     if (isPast)               el.classList.add("past");

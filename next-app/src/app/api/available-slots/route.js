@@ -18,6 +18,8 @@ export async function GET() {
       await generateSlots();
       const { rows: timeRows } = await client.query("SELECT NOW() AT TIME ZONE 'Asia/Kolkata' AS now");
       const now = new Date(timeRows[0].now + '+05:30');
+      const serverNowIso = now.toISOString();
+      const serverDateStr = localDateStr(now);
       const todayStr = localDateStr(now);
       const day1Str = localDateStr(addDays(now, 1));
       const day2Str = localDateStr(addDays(now, 2));
@@ -39,6 +41,9 @@ export async function GET() {
       return withCors(NextResponse.json({
         success: true,
         mode: "db",
+        server_now_iso: serverNowIso,
+        server_date: serverDateStr,
+        server_timezone: "Asia/Kolkata",
         slots: rows.map(r => ({
           slot_id: r.id,
           slot_date: r.slot_date,
@@ -48,12 +53,27 @@ export async function GET() {
       }));
     } catch (e) {
       console.error("DB slots error:", e.message);
-      // If DB is unreachable, fall back to in-memory slots to avoid breaking UI.
-      return withCors(NextResponse.json({ success: true, mode: "memory", slots: generateInMemorySlots() }));
+      const now = new Date();
+      return withCors(NextResponse.json({
+        success: true,
+        mode: "memory",
+        server_now_iso: now.toISOString(),
+        server_date: localDateStr(now),
+        server_timezone: "Asia/Kolkata",
+        slots: generateInMemorySlots(),
+      }));
     } finally {
       if (client) client.release();
     }
   }
 
-  return withCors(NextResponse.json({ success: true, mode: "memory", slots: generateInMemorySlots() }));
+  const now = new Date();
+  return withCors(NextResponse.json({
+    success: true,
+    mode: "memory",
+    server_now_iso: now.toISOString(),
+    server_date: localDateStr(now),
+    server_timezone: "Asia/Kolkata",
+    slots: generateInMemorySlots(),
+  }));
 }

@@ -21,6 +21,7 @@ export async function GET(request, { params }) {
       debug: { tokenFromQuery, tokenFromPath, pathname: url.pathname },
     }, { status: 400 }));
   }
+
   if (!DB_READY || !pool) {
     return withCors(NextResponse.json({ success: false, error: "Database not available" }, { status: 503 }));
   }
@@ -41,7 +42,6 @@ export async function GET(request, { params }) {
     const d = rows[0];
     const isEmpty = (v) => v === null || v === undefined || String(v).trim() === "";
 
-    // If critical fields are missing, try to hydrate from related tables.
     if (isEmpty(d.candidate_name) || isEmpty(d.email) || isEmpty(d.resume_text) || isEmpty(d.jd_text) || isEmpty(d.job_role)) {
       try {
         const fallback = await client.query(

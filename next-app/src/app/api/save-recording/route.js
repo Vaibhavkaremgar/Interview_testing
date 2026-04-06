@@ -33,8 +33,8 @@ export async function POST(request) {
   if (sessionToken && DB_READY && pool) {
     try {
       await pool.query(
-        `UPDATE interview_sessions SET recording_path = $1, recording_size_bytes = $2, recording_data = $3 WHERE session_token = $4`,
-        [relativePath, sizeBytes, buffer, sessionToken]
+        `UPDATE interview_sessions SET recording_path = $1, recording_size_bytes = $2, recording_data = NULL WHERE session_token = $3`,
+        [relativePath, sizeBytes, sessionToken]
       );
     } catch (e) {
       console.warn("Could not save recording to DB:", e.message);

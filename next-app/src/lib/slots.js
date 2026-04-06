@@ -195,7 +195,6 @@ function buildInterviewLink(sessionToken) {
   const base = (FRONTEND_INTERVIEW_URL || "").trim();
   if (!base) return `?${params.toString()}`;
 
-  // Normalize to avoid redirect losing query params.
   let url = base;
   if (url.endsWith("/")) url = url.slice(0, -1);
   if (url.endsWith("/interview")) url = `${url}/index.html`;

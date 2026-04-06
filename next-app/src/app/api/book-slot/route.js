@@ -68,7 +68,6 @@ export async function POST(request) {
       let finalJobRole = jobRole;
       const finalQuestions = interviewQuestions || async_questions || asyncQuestions || [];
 
-      // If any critical metadata is missing, hydrate from booking token payload.
       if ((!finalResume || !finalJD || !finalJobRole) && bookingToken) {
         try {
           const { rows: tokRows } = await client.query(

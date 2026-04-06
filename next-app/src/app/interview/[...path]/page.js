@@ -22,5 +22,5 @@ function buildQuery(searchParams) {
 export default function InterviewCatchAll({ searchParams }) {
   const sp = typeof searchParams?.then === "function" ? use(searchParams) : searchParams;
   const suffix = buildQuery(sp);
-  redirect(`/interview/index.html${suffix}`);
+  redirect(`/interview${suffix}`);
 }
