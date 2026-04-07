@@ -82,13 +82,6 @@ export async function GET(request, { params }) {
       : slotMeta?.slot_date || null;
     const slotTimeStr = slotMeta?.slot_time ? slotMeta.slot_time.toString().slice(0, 8) : null;
     let expired = false;
-    const slotStart = parseSlotStart(slotDateStr, slotTimeStr);
-    if (slotStart) {
-      const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
-      if (Date.now() > slotEnd.getTime()) {
-        expired = true;
-      }
-    }
 
     let interviewQuestions = d.interview_questions || [];
     if (typeof interviewQuestions === "string") {

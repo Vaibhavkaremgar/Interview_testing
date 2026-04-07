@@ -197,8 +197,6 @@ function buildInterviewLink(sessionToken) {
 
   let url = base;
   if (url.endsWith("/")) url = url.slice(0, -1);
-  if (url.endsWith("/interview")) url = `${url}/index.html`;
-
   return `${url}?${params.toString()}`;
 }
 
