@@ -4,6 +4,7 @@ import path from "path";
 import { spawn } from "child_process";
 import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
+import { enqueueRecordingRetry, startRecordingRetryLoop } from "@/lib/recordingRetry.js";
 
 export const runtime = "nodejs";
 
@@ -55,6 +56,8 @@ export async function POST(request) {
   if (!sessionToken) {
     return withCors(NextResponse.json({ success: false, message: "Invalid session" }, { status: 400 }));
   }
+
+  startRecordingRetryLoop();
 
   const recordingsDir = path.join(process.cwd(), "recordings");
   if (!fs.existsSync(recordingsDir)) {
@@ -125,35 +128,47 @@ export async function POST(request) {
 
     if (converted) {
       const stats = fs.statSync(finalPath);
-      if (DB_READY && pool) {
-        await pool.query(
-          `UPDATE interview_sessions
-           SET recording_path = $1,
-               recording_size_bytes = $2,
-               recording_duration_seconds = $3,
-               recording_format = $4,
-               recording_data = NULL,
-               recording_created_at = NOW()
-           WHERE session_token = $5`,
-          [path.basename(finalPath), stats.size, duration, finalFormatLocal, sessionToken]
-        );
+      const fileName = path.basename(finalPath);
+      try {
+        if (DB_READY && pool) {
+          await pool.query(
+            `UPDATE interview_sessions
+             SET recording_path = $1,
+                 recording_size_bytes = $2,
+                 recording_duration_seconds = $3,
+                 recording_format = $4,
+                 recording_data = NULL,
+                 recording_created_at = NOW()
+             WHERE session_token = $5`,
+            [fileName, stats.size, duration, finalFormatLocal, sessionToken]
+          );
+        }
+      } catch (err) {
+        console.error("Failed to save recording metadata, enqueuing retry:", err.message);
+        await enqueueRecordingRetry(sessionToken, fileName, err.message);
       }
       finalFormat = finalFormatLocal;
     } else if (fs.existsSync(webmPath)) {
       const stats = fs.statSync(webmPath);
       const dur = await getVideoDuration(webmPath);
-      if (DB_READY && pool) {
-        await pool.query(
-          `UPDATE interview_sessions
-           SET recording_path = $1,
-               recording_size_bytes = $2,
-               recording_duration_seconds = $3,
-               recording_format = $4,
-               recording_data = NULL,
-               recording_created_at = NOW()
-           WHERE session_token = $5`,
-          [path.basename(webmPath), stats.size, dur, "webm", sessionToken]
-        );
+      const fileName = path.basename(webmPath);
+      try {
+        if (DB_READY && pool) {
+          await pool.query(
+            `UPDATE interview_sessions
+             SET recording_path = $1,
+                 recording_size_bytes = $2,
+                 recording_duration_seconds = $3,
+                 recording_format = $4,
+                 recording_data = NULL,
+                 recording_created_at = NOW()
+             WHERE session_token = $5`,
+            [fileName, stats.size, dur, "webm", sessionToken]
+          );
+        }
+      } catch (err) {
+        console.error("Failed to save recording metadata, enqueuing retry:", err.message);
+        await enqueueRecordingRetry(sessionToken, fileName, err.message);
       }
       finalFormat = "webm";
     }

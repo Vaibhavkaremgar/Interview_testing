@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
+import { enqueueRecordingRetry, startRecordingRetryLoop } from "@/lib/recordingRetry.js";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,8 @@ export async function POST(request) {
   const formData = await request.formData();
   const file = formData.get("recording");
   const sessionToken = formData.get("sessionToken") || "";
+
+  startRecordingRetryLoop();
 
   if (!file || typeof file.arrayBuffer !== "function") {
     return withCors(NextResponse.json({ success: false, message: "No file" }, { status: 400 }));
@@ -37,7 +40,8 @@ export async function POST(request) {
         [relativePath, sizeBytes, sessionToken]
       );
     } catch (e) {
-      console.warn("Could not save recording to DB:", e.message);
+      console.warn("Could not save recording to DB, enqueuing retry:", e.message);
+      await enqueueRecordingRetry(sessionToken, relativePath, e.message);
     }
   }
 
