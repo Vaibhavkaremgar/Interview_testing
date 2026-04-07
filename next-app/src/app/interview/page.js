@@ -54,6 +54,7 @@ export default function InterviewPage() {
       let lastRole           = null;
       let lastEntry          = null;
       const tappedElements   = new WeakSet();
+      const PROCTORING_BOOT_DELAY_MS = 3000;
       const proctoringConfig = {
         enableFacePresence: true,
         enableHeadPose: true,
@@ -65,7 +66,7 @@ export default function InterviewPage() {
         yawThreshold: 0.35,
         pitchThreshold: 0.35,
         gazeThreshold: 0.35,
-        detectionIntervalMs: 400,
+        detectionIntervalMs: 800,
       };
       let faceDetector = null;
       let faceDetectInterval = null;
@@ -522,7 +523,6 @@ export default function InterviewPage() {
         if (candidateLabel) candidateLabel.textContent = variableValues.candidateName;
         const camOk = await setupCamera();
         if (!camOk) return;
-        await setupFaceProctoring();
         setStatus("Connecting to AI interviewer...");
         vapi = new Vapi(PUBLIC_KEY);
 
@@ -533,7 +533,10 @@ export default function InterviewPage() {
           setLiveIndicator("Interview started — AI is speaking...");
           if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
           startRecording();
-          startFaceProctoring();
+          setTimeout(async () => {
+            await setupFaceProctoring();
+            startFaceProctoring();
+          }, PROCTORING_BOOT_DELAY_MS);
           const sessionToken = getParam("session");
           heartbeatInterval = setInterval(() => {
             const transcript = Array.from(document.querySelectorAll(".transcript-entry .text")).map(el => el.textContent).join("\n");
