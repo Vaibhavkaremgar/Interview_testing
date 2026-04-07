@@ -331,13 +331,12 @@ body {
 #permError button { margin-top: 8px; padding: 10px 28px; background: #4f46e5; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
 
 #expiredScreen {
-  display: none;
+  display: none; /* hidden by default; JS sets to flex only when expired */
   position: fixed;
   inset: 0;
   background: #0f172acc;
   color: #e2e8f0;
   z-index: 9999;
-  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
