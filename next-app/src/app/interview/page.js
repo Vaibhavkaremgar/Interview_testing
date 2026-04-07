@@ -11,7 +11,6 @@ export default function InterviewPage() {
       const PUBLIC_KEY   = "86f389eb-e146-4c6b-815f-c938e49865d1";
       const ASSISTANT_ID = "ea94243f-bbf4-45c2-90c3-22d89e017aed";
       const API_BASE     = "";
-      const DISABLE_EXPIRY_CHECK = true; // temporary: allow interviews even if slot is marked expired
 
       function getParam(key) {
         return new URLSearchParams(window.location.search).get(key) || null;
@@ -133,7 +132,7 @@ export default function InterviewPage() {
             jobId:          vv.jobId,
             async_questions: incomingQuestions,
             interview_questions: incomingQuestions,
-            expired: DISABLE_EXPIRY_CHECK ? false : !!sd.expired,
+            expired: false,
           };
           if (sd.resumed && sd.lastTranscript) {
             vv.resuming = "true";
@@ -508,11 +507,6 @@ export default function InterviewPage() {
         variableValues = await initializeConfig();
         if (!variableValues) return;
 
-        if (variableValues.expired && !DISABLE_EXPIRY_CHECK) {
-          document.getElementById("expiredScreen").style.display = "flex";
-          hideOverlay();
-          return;
-        }
         tabSwitchCount = 0;
         proctoringTerminated = false;
         const sessionToken = getParam("session") || "";
