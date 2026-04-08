@@ -5,6 +5,8 @@ import { spawn } from "child_process";
 import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
 import { enqueueRecordingRetry, startRecordingRetryLoop } from "@/lib/recordingRetry.js";
+import ffmpegStatic from "ffmpeg-static";
+import ffprobeStatic from "ffprobe-static";
 
 export const runtime = "nodejs";
 
@@ -12,9 +14,12 @@ export function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders });
 }
 
+const FFMPG_BIN = ffmpegStatic || "ffmpeg";
+const FFPROBE_BIN = (ffprobeStatic && (ffprobeStatic.path || ffprobeStatic.ffprobePath)) || "ffprobe";
+
 async function convertToMp4(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    const ffmpeg = spawn("ffmpeg", [
+    const ffmpeg = spawn(FFMPG_BIN, [
       "-i", inputPath,
       "-c:v", "libx264",
       "-preset", "fast",
@@ -32,7 +37,7 @@ async function convertToMp4(inputPath, outputPath) {
 
 async function getVideoDuration(filePath) {
   return new Promise((resolve) => {
-    const ffprobe = spawn("ffprobe", ["-v", "quiet", "-print_format", "json", "-show_format", filePath]);
+    const ffprobe = spawn(FFPROBE_BIN, ["-v", "quiet", "-print_format", "json", "-show_format", filePath]);
     let output = "";
     ffprobe.stdout.on("data", (data) => { output += data.toString(); });
     ffprobe.on("close", (code) => {
