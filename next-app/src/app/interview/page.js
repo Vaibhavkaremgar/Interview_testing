@@ -8,8 +8,8 @@ export default function InterviewPage() {
       const VapiSDK = mod.default || mod;
       const Vapi = VapiSDK.default || VapiSDK;
 
-      const PUBLIC_KEY   = "86f389eb-e146-4c6b-815f-c938e49865d1";
-      const ASSISTANT_ID = "ea94243f-bbf4-45c2-90c3-22d89e017aed";
+      const PUBLIC_KEY   = "f3234324-c709-4c43-9574-59d48287a0e1";
+      const ASSISTANT_ID = "9e35651f-30ff-49a5-85b7-007e25513445";
       const API_BASE     = "";
 
       function getParam(key) {
