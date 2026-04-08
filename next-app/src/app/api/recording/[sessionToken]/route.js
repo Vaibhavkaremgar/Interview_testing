@@ -79,6 +79,11 @@ export async function GET(request, { params }) {
     }
 
     const fullPath = path.join(process.cwd(), "recordings", recording_path);
+    // Debug: log which instance is serving and which path it's using
+    console.log("[recording] host:", process.env.HOSTNAME || "unknown",
+                "cwd:", process.cwd(),
+                "file:", fullPath,
+                "exists:", fs.existsSync(fullPath));
 
     if (!fs.existsSync(fullPath)) {
       return withCors(NextResponse.json({ error: "Recording file not found" }, { status: 404 }));

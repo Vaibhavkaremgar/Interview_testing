@@ -14,6 +14,8 @@ export function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders });
 }
 
+const AUTO_FINALIZE_MS = 45000; // auto-finish if no chunks arrive for 45s
+
 const FFMPG_BIN = ffmpegStatic || "ffmpeg";
 const FFPROBE_BIN = (ffprobeStatic && (ffprobeStatic.path || ffprobeStatic.ffprobePath)) || "ffprobe";
 
@@ -75,7 +77,10 @@ export async function POST(request) {
   if (!fs.existsSync(partsDir)) fs.mkdirSync(partsDir);
 
   const statePath = path.join(recordingsDir, `${sessionToken}.state.json`);
-  const loadState = () => { try { return JSON.parse(fs.readFileSync(statePath, "utf8")); } catch { return { nextIndex: 0 }; } };
+  const loadState = () => {
+    try { return JSON.parse(fs.readFileSync(statePath, "utf8")); }
+    catch { return { nextIndex: 0, lastChunkAt: 0, finalized: false }; }
+  };
   const saveState = (state) => fs.writeFileSync(statePath, JSON.stringify(state));
 
   if (chunk && typeof chunk.arrayBuffer === "function") {
@@ -104,13 +109,22 @@ export async function POST(request) {
     appendedBytes += buf.length;
     appendedChunks += 1;
     state.nextIndex += 1;
+    state.lastChunkAt = Date.now();
     saveState(state);
   }
 
   let converted = false;
   let finalFormat = null;
 
-  if (isFinal && fs.existsSync(webmPath)) {
+  const shouldAutoFinalize = !isFinal
+    && state.lastChunkAt
+    && Date.now() - state.lastChunkAt > AUTO_FINALIZE_MS
+    && !state.finalized
+    && fs.existsSync(webmPath);
+
+  const finalizeNow = (isFinal || shouldAutoFinalize) && fs.existsSync(webmPath);
+
+  if (finalizeNow) {
     let finalPath = webmPath;
     let finalFormatLocal = "webm";
     let duration = 0;
@@ -180,6 +194,10 @@ export async function POST(request) {
 
     if (fs.existsSync(partsDir)) fs.rmSync(partsDir, { recursive: true, force: true });
     if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+  } else if (shouldAutoFinalize) {
+    // We expected to auto-finalize but webm isn't present; mark as finalized to avoid loops.
+    state.finalized = true;
+    saveState(state);
   } else if (isFinal) {
     console.warn("isFinal=true but webm file does not exist at:", webmPath);
   }
