@@ -101,3 +101,10 @@ export async function GET(request, { params }) {
     return withCors(NextResponse.json({ error: "Failed to stream recording" }, { status: 500 }));
   }
 }
+
+// Mirror GET for HEAD while preserving auth and range capability headers.
+export async function HEAD(request, ctx) {
+  const res = await GET(request, ctx);
+  // Strip body for HEAD while keeping status/headers (Next Response is immutable; clone)
+  return new Response(null, { status: res.status, statusText: res.statusText, headers: res.headers });
+}

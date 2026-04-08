@@ -1,4 +1,5 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
 
 :root {
   --bg-start: #0c0d16;
@@ -60,6 +61,9 @@ body {
   display: grid;
   grid-template-columns: 1fr 360px;
   min-height: 0;
+  height: calc(100vh - 140px); /* lock layout so stage tiles don't move when transcript grows */
+  max-height: calc(100vh - 140px);
+  overflow: hidden;
 }
 
 #stage {
@@ -68,6 +72,8 @@ body {
   place-items: center;
   padding: 32px;
   overflow: hidden;
+  height: 100%;
+  min-height: 0;
 }
 
 #stage::before {
@@ -210,6 +216,8 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  height: 100%;
+  min-height: 0;
 }
 .panel-header {
   display: flex;

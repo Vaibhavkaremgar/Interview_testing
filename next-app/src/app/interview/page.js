@@ -46,8 +46,11 @@ export default function InterviewPage() {
       let heartbeatInterval  = null;
       let mediaRecorder      = null;
       let vapiRecordingUrl   = null;
+      const REJOIN_WINDOW_MS = 90_000;
+      const LS_DISCONNECT_AT = "lastDisconnectAt";
       let proctoringTerminated = false;
       let tabSwitchCount     = 0;
+      let interviewStarting  = false;
       let audioCtx           = null;
       let vapiAudioCaptured  = false;
       let camOffSince        = null;
@@ -78,6 +81,10 @@ export default function InterviewPage() {
 
       function setStatus(msg) { if (statusText) statusText.textContent = msg; }
       function hideOverlay()  { if (statusOverlay) statusOverlay.style.display = "none"; }
+      function showExpired(msg) {
+        if (statusOverlay) statusOverlay.style.display = "flex";
+        setStatus(msg || "Interview link is no longer available.");
+      }
 
       async function fetchSessionMetadata(sessionToken) {
         try {
@@ -248,6 +255,8 @@ export default function InterviewPage() {
           }
         } catch (e) {
           console.warn("Face model load failed, falling back to basic face detection:", e?.message || e);
+          setStatus("Proctoring limited: face model failed to load, retrying...");
+          setTimeout(() => setupFaceProctoring().catch(() => {}), 5000);
         }
         if (!faceDetector && "FaceDetector" in window) {
           try { faceDetector = new window.FaceDetector({ maxDetectedFaces: 1, fastMode: true }); } catch (_) {}
@@ -483,8 +492,8 @@ export default function InterviewPage() {
 
       endBtn.addEventListener("click", () => { if (vapi) vapi.stop(); endCall(); });
 
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState !== "hidden" || !vapi) return;
+      function handleTabSwitch() {
+        if (!vapi) return;
         tabSwitchCount++;
         const msg = tabSwitchCount === 1
           ? "The candidate just switched tabs. Stop and warn them tab switching is not allowed and is being recorded."
@@ -495,7 +504,12 @@ export default function InterviewPage() {
           body: JSON.stringify({ session_token: getParam("session") || "", transcript_so_far: `[PROCTORING] Tab switch #${tabSwitchCount} at ${new Date().toISOString()}` }),
         }).catch(() => {});
         if (tabSwitchCount > 3) terminateInterview("Repeated tab switching detected.");
+      }
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") handleTabSwitch();
       });
+      window.addEventListener("blur", () => handleTabSwitch());
 
       document.addEventListener("fullscreenchange", () => {
         if (document.fullscreenElement || !vapi) return;
@@ -503,15 +517,28 @@ export default function InterviewPage() {
       });
 
       async function startInterview() {
+        if (interviewStarting) return;
+        interviewStarting = true;
         setStatus("Loading interview details...");
         variableValues = await initializeConfig();
-        if (!variableValues) return;
+        if (!variableValues) { interviewStarting = false; return; }
 
         tabSwitchCount = 0;
         proctoringTerminated = false;
         const sessionToken = getParam("session") || "";
+        const lastDisc = (() => {
+          try { return Number(localStorage.getItem(LS_DISCONNECT_AT) || "0"); } catch { return 0; }
+        })();
+        if (lastDisc && Date.now() - lastDisc > REJOIN_WINDOW_MS) {
+          showExpired("Session closed: reconnect window (90s) passed. Please contact support for a new link.");
+          interviewStarting = false;
+          return;
+        }
         if (sessionToken) {
-          try { localStorage.setItem("recChunk:" + sessionToken, "0"); } catch (_) {}
+          try {
+            const idxKey = "recChunk:" + sessionToken;
+            if (!localStorage.getItem(idxKey)) localStorage.setItem(idxKey, "0");
+          } catch (_) {}
         }
         const initials = variableValues.candidateName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
         if (candidateAvatar) candidateAvatar.textContent = initials || "?";
@@ -551,6 +578,7 @@ export default function InterviewPage() {
               body: JSON.stringify({ recordingUrl: vapiRecordingUrl, sessionToken: getParam("session") || "" }),
             }).catch(() => {});
           }
+          try { localStorage.setItem(LS_DISCONNECT_AT, String(Date.now())); } catch (_) {}
           endCall();
         });
 
@@ -574,6 +602,15 @@ export default function InterviewPage() {
         vapi.on("error", (err) => {
           setStatus("Connection error: " + (err.message || JSON.stringify(err)));
           if (statusOverlay) statusOverlay.style.display = "flex";
+          try { localStorage.setItem(LS_DISCONNECT_AT, String(Date.now())); } catch (_) {}
+          // simple retry once after 3s
+          setTimeout(() => {
+            const lastDiscNow = Number(localStorage.getItem(LS_DISCONNECT_AT) || "0");
+            if (Date.now() - lastDiscNow <= REJOIN_WINDOW_MS) {
+              setStatus("Reconnecting...");
+              startInterview();
+            }
+          }, 3000);
         });
 
         try {
@@ -603,6 +640,7 @@ export default function InterviewPage() {
         });
       } catch (err) {
         setStatus("Failed to start: " + (err.message || JSON.stringify(err)));
+        interviewStarting = false;
       }
       }
 
