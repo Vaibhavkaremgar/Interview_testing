@@ -50,6 +50,8 @@ export async function GET(request, { params }) {
   }
 
   try {
+    console.log("[recording] GET", { sessionToken });
+
     const { rows } = await pool.query(
       `SELECT recording_path, recording_size_bytes, recording_format, recording_duration_seconds, recording_data
        FROM interview_sessions
@@ -62,6 +64,7 @@ export async function GET(request, { params }) {
     }
 
     const { recording_path, recording_size_bytes, recording_format, recording_duration_seconds, recording_data } = rows[0];
+    console.log("[recording] DB row", { recording_path, size: recording_size_bytes, format: recording_format });
 
     if (recording_data) {
       const headers = new Headers();
@@ -78,12 +81,15 @@ export async function GET(request, { params }) {
       return new Response(recording_data, { headers });
     }
 
-    const fullPath = path.join(process.cwd(), "recordings", recording_path);
+    const recordingsDir = process.env.RECORDINGS_DIR || path.join(process.cwd(), "recordings");
+    const fullPath = path.join(recordingsDir, recording_path);
     // Debug: log which instance is serving and which path it's using
     console.log("[recording] host:", process.env.HOSTNAME || "unknown",
                 "cwd:", process.cwd(),
                 "file:", fullPath,
                 "exists:", fs.existsSync(fullPath));
+
+    console.log("[recording] file check", { fullPath, exists: fs.existsSync(fullPath) });
 
     if (!fs.existsSync(fullPath)) {
       return withCors(NextResponse.json({ error: "Recording file not found" }, { status: 404 }));

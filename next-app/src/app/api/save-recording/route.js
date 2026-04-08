@@ -22,7 +22,7 @@ export async function POST(request) {
     return withCors(NextResponse.json({ success: false, message: "No file" }, { status: 400 }));
   }
 
-  const recordingsDir = path.join(process.cwd(), "recordings");
+  const recordingsDir = process.env.RECORDINGS_DIR || path.join(process.cwd(), "recordings");
   if (!fs.existsSync(recordingsDir)) fs.mkdirSync(recordingsDir);
 
   const filename = `${sessionToken || Date.now()}.webm`;

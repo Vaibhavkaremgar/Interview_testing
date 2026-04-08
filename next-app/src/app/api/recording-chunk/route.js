@@ -66,7 +66,7 @@ export async function POST(request) {
 
   startRecordingRetryLoop();
 
-  const recordingsDir = path.join(process.cwd(), "recordings");
+  const recordingsDir = process.env.RECORDINGS_DIR || path.join(process.cwd(), "recordings");
   if (!fs.existsSync(recordingsDir)) {
     try { fs.mkdirSync(recordingsDir); } catch (err) { console.error("Failed to create recordings directory:", err.message); }
   }
@@ -111,6 +111,37 @@ export async function POST(request) {
     state.nextIndex += 1;
     state.lastChunkAt = Date.now();
     saveState(state);
+  }
+
+  console.log("[recording-chunk] Recording append:", {
+    sessionToken,
+    appendedChunks,
+    appendedBytes,
+    fileExists: fs.existsSync(webmPath),
+  });
+
+  // Persist recording_path as soon as we have a merged file, so a missed final request won't leave DB null.
+  if (DB_READY && pool && fs.existsSync(webmPath) && appendedChunks > 0) {
+    try {
+      const stats = fs.statSync(webmPath);
+      console.log("[recording-chunk] DB update triggered");
+      await pool.query(
+        `UPDATE interview_sessions
+           SET recording_path = $1,
+               recording_size_bytes = COALESCE(recording_size_bytes, $2),
+               recording_format = COALESCE(recording_format, 'webm'),
+               recording_created_at = COALESCE(recording_created_at, NOW())
+         WHERE session_token = $3`,
+        [path.basename(webmPath), stats.size, sessionToken]
+      );
+      console.log("[recording-chunk] Recording path persisted early", {
+        sessionToken,
+        file: path.basename(webmPath),
+        size: stats.size,
+      });
+    } catch (err) {
+      console.warn("[recording-chunk] Early recording_path persist failed:", err.message);
+    }
   }
 
   let converted = false;
@@ -201,6 +232,18 @@ export async function POST(request) {
   } else if (isFinal) {
     console.warn("isFinal=true but webm file does not exist at:", webmPath);
   }
+
+  console.log("[recording-chunk] Append result", {
+    sessionToken,
+    appendedChunks,
+    appendedBytes,
+    hasWebm: fs.existsSync(webmPath),
+    hasMp4: fs.existsSync(mp4Path),
+    isFinal,
+    shouldAutoFinalize,
+    converted,
+    format: finalFormat,
+  });
 
   return withCors(NextResponse.json({
     success: true,

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { pool, DB_READY } from "./db.js";
+import { recoverMissingRecordings } from "./recordingRecovery.js";
 
 const RETRY_INTERVAL_MS = 30000;
 const MAX_BATCH = 10;
@@ -46,6 +47,7 @@ async function runRetryCycle() {
   if (!DB_READY || !pool) return;
   try {
     await ensureRetryTable();
+    await recoverMissingRecordings();
     const { rows } = await pool.query(
       `SELECT id, session_token, file_name, attempts FROM recording_retry_queue
        ORDER BY created_at ASC
@@ -53,7 +55,8 @@ async function runRetryCycle() {
       [MAX_BATCH]
     );
     for (const row of rows) {
-      const fullPath = path.join(process.cwd(), "recordings", row.file_name);
+      const recordingsDir = process.env.RECORDINGS_DIR || path.join(process.cwd(), "recordings");
+      const fullPath = path.join(recordingsDir, row.file_name);
       const stats = fs.existsSync(fullPath) ? fs.statSync(fullPath) : null;
       if (!stats) {
         await pool.query(
