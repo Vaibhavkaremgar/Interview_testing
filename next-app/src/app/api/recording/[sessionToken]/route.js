@@ -79,18 +79,19 @@ function parseRange(rangeHeader, fileSize) {
   return { start, end };
 }
 
-export async function GET(request, { params }) {
+export async function GET(request, context) {
+
+  const params = await context.params;
+  const sessionToken = params?.sessionToken || "";
 
   console.log("========== RECORDING DEBUG START ==========");
   console.log("params:", params);
-  console.log("sessionToken:", params?.sessionToken);
+  console.log("sessionToken:", sessionToken);
   console.log("request.url:", request.url);
   console.log("===========================================");
 
   const authResult = validateAuth(request);
   if (!authResult.ok) return authResult.response;
-
-  const sessionToken = params?.sessionToken || "";
 
   if (!sessionToken) {
     console.log("[recording] sessionToken missing");
@@ -262,6 +263,6 @@ export async function GET(request, { params }) {
   }
 }
 
-export async function HEAD(request, ctx) {
-  return GET(request, ctx);
+export async function HEAD(request, context) {
+  return GET(request, context);
 }
