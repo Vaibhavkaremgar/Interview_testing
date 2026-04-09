@@ -4,6 +4,7 @@ import path from "path";
 import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
 import { enqueueRecordingRetry, startRecordingRetryLoop } from "@/lib/recordingRetry.js";
+import { startRecordingConversionWorker, queueConversion } from "@/lib/recordingConversionWorker.js";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,7 @@ export async function POST(request) {
   const sessionToken = formData.get("sessionToken") || "";
 
   startRecordingRetryLoop();
+  startRecordingConversionWorker();
 
   if (!file || typeof file.arrayBuffer !== "function") {
     return withCors(NextResponse.json({ success: false, message: "No file" }, { status: 400 }));
@@ -32,6 +34,8 @@ export async function POST(request) {
 
   const relativePath = filename;
   const sizeBytes = buffer.length;
+
+  if (sessionToken) queueConversion(sessionToken.toString());
 
   if (sessionToken && DB_READY && pool) {
     try {

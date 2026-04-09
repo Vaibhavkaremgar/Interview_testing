@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
 import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
-import { enqueueRecordingRetry, startRecordingRetryLoop } from "@/lib/recordingRetry.js";
-import ffmpegStatic from "ffmpeg-static";
-import ffprobeStatic from "ffprobe-static";
+import { startRecordingRetryLoop } from "@/lib/recordingRetry.js";
+import { startRecordingConversionWorker, queueConversion } from "@/lib/recordingConversionWorker.js";
 
 export const runtime = "nodejs";
 
@@ -16,42 +14,7 @@ export function OPTIONS() {
 
 const AUTO_FINALIZE_MS = 45000; // auto-finish if no chunks arrive for 45s
 
-const FFMPG_BIN = ffmpegStatic || "ffmpeg";
-const FFPROBE_BIN = (ffprobeStatic && (ffprobeStatic.path || ffprobeStatic.ffprobePath)) || "ffprobe";
-
-async function convertToMp4(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    const ffmpeg = spawn(FFMPG_BIN, [
-      "-i", inputPath,
-      "-c:v", "libx264",
-      "-preset", "fast",
-      "-crf", "23",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-movflags", "+faststart",
-      "-y",
-      outputPath,
-    ]);
-    ffmpeg.on("close", (code) => code === 0 ? resolve() : reject(new Error(`FFmpeg exited with code ${code}`)));
-    ffmpeg.on("error", reject);
-  });
-}
-
-async function getVideoDuration(filePath) {
-  return new Promise((resolve) => {
-    const ffprobe = spawn(FFPROBE_BIN, ["-v", "quiet", "-print_format", "json", "-show_format", filePath]);
-    let output = "";
-    ffprobe.stdout.on("data", (data) => { output += data.toString(); });
-    ffprobe.on("close", (code) => {
-      if (code === 0) {
-        try { resolve(Math.round(parseFloat(JSON.parse(output).format.duration))); } catch { resolve(0); }
-      } else {
-        resolve(0);
-      }
-    });
-    ffprobe.on("error", () => resolve(0));
-  });
-}
+startRecordingConversionWorker();
 
 export async function POST(request) {
   const formData = await request.formData();
@@ -72,14 +35,13 @@ export async function POST(request) {
   }
 
   const webmPath = path.join(recordingsDir, `${sessionToken}.webm`);
-  const mp4Path = path.join(recordingsDir, `${sessionToken}.mp4`);
   const partsDir = path.join(recordingsDir, `${sessionToken}.parts`);
   if (!fs.existsSync(partsDir)) fs.mkdirSync(partsDir);
 
   const statePath = path.join(recordingsDir, `${sessionToken}.state.json`);
   const loadState = () => {
     try { return JSON.parse(fs.readFileSync(statePath, "utf8")); }
-    catch { return { nextIndex: 0, lastChunkAt: 0, finalized: false }; }
+    catch { return { nextIndex: 0, lastChunkAt: 0, finalized: false, conversionAttempts: 0 }; }
   };
   const saveState = (state) => fs.writeFileSync(statePath, JSON.stringify(state));
 
@@ -156,75 +118,10 @@ export async function POST(request) {
   const finalizeNow = (isFinal || shouldAutoFinalize) && fs.existsSync(webmPath);
 
   if (finalizeNow) {
-    let finalPath = webmPath;
-    let finalFormatLocal = "webm";
-    let duration = 0;
-
-    try {
-      await convertToMp4(webmPath, mp4Path);
-      if (fs.existsSync(mp4Path)) {
-        duration = await getVideoDuration(mp4Path);
-        finalPath = mp4Path;
-        finalFormatLocal = "mp4";
-        converted = true;
-        fs.unlinkSync(webmPath);
-      }
-    } catch (e) {
-      console.warn("FFmpeg conversion failed, keeping WebM:", e.message);
-      duration = await getVideoDuration(webmPath);
-      finalFormatLocal = "webm";
-      converted = true;
-    }
-
-    if (converted) {
-      const stats = fs.statSync(finalPath);
-      const fileName = path.basename(finalPath);
-      try {
-        if (DB_READY && pool) {
-          await pool.query(
-            `UPDATE interview_sessions
-             SET recording_path = $1,
-                 recording_size_bytes = $2,
-                 recording_duration_seconds = $3,
-                 recording_format = $4,
-                 recording_data = NULL,
-                 recording_created_at = NOW()
-             WHERE session_token = $5`,
-            [fileName, stats.size, duration, finalFormatLocal, sessionToken]
-          );
-        }
-      } catch (err) {
-        console.error("Failed to save recording metadata, enqueuing retry:", err.message);
-        await enqueueRecordingRetry(sessionToken, fileName, err.message);
-      }
-      finalFormat = finalFormatLocal;
-    } else if (fs.existsSync(webmPath)) {
-      const stats = fs.statSync(webmPath);
-      const dur = await getVideoDuration(webmPath);
-      const fileName = path.basename(webmPath);
-      try {
-        if (DB_READY && pool) {
-          await pool.query(
-            `UPDATE interview_sessions
-             SET recording_path = $1,
-                 recording_size_bytes = $2,
-                 recording_duration_seconds = $3,
-                 recording_format = $4,
-                 recording_data = NULL,
-                 recording_created_at = NOW()
-             WHERE session_token = $5`,
-            [fileName, stats.size, dur, "webm", sessionToken]
-          );
-        }
-      } catch (err) {
-        console.error("Failed to save recording metadata, enqueuing retry:", err.message);
-        await enqueueRecordingRetry(sessionToken, fileName, err.message);
-      }
-      finalFormat = "webm";
-    }
-
-    if (fs.existsSync(partsDir)) fs.rmSync(partsDir, { recursive: true, force: true });
-    if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+    state.finalized = true;
+    saveState(state);
+    console.log("[recording] finalize triggered", { sessionToken, reason: isFinal ? "client-final" : "auto-timeout" });
+    queueConversion(sessionToken);
   } else if (shouldAutoFinalize) {
     // We expected to auto-finalize but webm isn't present; mark as finalized to avoid loops.
     state.finalized = true;
@@ -238,7 +135,7 @@ export async function POST(request) {
     appendedChunks,
     appendedBytes,
     hasWebm: fs.existsSync(webmPath),
-    hasMp4: fs.existsSync(mp4Path),
+    hasMp4: fs.existsSync(path.join(recordingsDir, `${sessionToken}.mp4`)),
     isFinal,
     shouldAutoFinalize,
     converted,

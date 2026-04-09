@@ -46,8 +46,6 @@ export default function InterviewPage() {
       let heartbeatInterval  = null;
       let mediaRecorder      = null;
       let vapiRecordingUrl   = null;
-      const REJOIN_WINDOW_MS = 90_000;
-      const LS_DISCONNECT_AT = "lastDisconnectAt";
       let proctoringTerminated = false;
       let tabSwitchCount     = 0;
       let interviewStarting  = false;
@@ -85,6 +83,19 @@ export default function InterviewPage() {
         if (statusOverlay) statusOverlay.style.display = "flex";
         setStatus(msg || "Interview link is no longer available.");
       }
+
+      window.addEventListener("beforeunload", () => {
+        const sessionToken = getParam("session") || "";
+        if (!sessionToken) return;
+        const payload = JSON.stringify({ session_token: sessionToken });
+        const url = `${API_BASE}/api/session-disconnect`;
+        if (navigator.sendBeacon) {
+          const blob = new Blob([payload], { type: "application/json" });
+          navigator.sendBeacon(url, blob);
+        } else {
+          fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+        }
+      });
 
       async function fetchSessionMetadata(sessionToken) {
         try {
@@ -526,13 +537,23 @@ export default function InterviewPage() {
         tabSwitchCount = 0;
         proctoringTerminated = false;
         const sessionToken = getParam("session") || "";
-        const lastDisc = (() => {
-          try { return Number(localStorage.getItem(LS_DISCONNECT_AT) || "0"); } catch { return 0; }
-        })();
-        if (lastDisc && Date.now() - lastDisc > REJOIN_WINDOW_MS) {
-          showExpired("Session closed: reconnect window (90s) passed. Please contact support for a new link.");
-          interviewStarting = false;
-          return;
+        let resumeData = null;
+        if (sessionToken) {
+          const resumeResp = await fetch(`${API_BASE}/api/session-resume/${encodeURIComponent(sessionToken)}`).catch(() => null);
+          resumeData = resumeResp && resumeResp.ok ? await resumeResp.json().catch(() => null) : null;
+          const allowResume = resumeData?.allowResume === true;
+          if (!allowResume && resumeData) {
+            showExpired("Session closed: reconnect window (90s) passed. Please contact support for a new link.");
+            interviewStarting = false;
+            return;
+          }
+          if (allowResume) {
+            variableValues = variableValues || {};
+            variableValues.resuming = "true";
+            if (resumeData.vapi_conversation_state) {
+              variableValues.previousContext = JSON.stringify(resumeData.vapi_conversation_state);
+            }
+          }
         }
         if (sessionToken) {
           try {
@@ -548,25 +569,37 @@ export default function InterviewPage() {
         setStatus("Connecting to AI interviewer...");
         vapi = new Vapi(PUBLIC_KEY);
 
-        vapi.on("call-start", async () => {
+        vapi.on("call-start", async (callData) => {
           hideOverlay();
           if (callInfo) callInfo.textContent = `Interview · ${variableValues.candidateName}`;
           startTimer();
           setLiveIndicator("Interview started — AI is speaking...");
           if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
           startRecording();
+          if (sessionToken) {
+            const callId = callData?.id || callData?.callId || null;
+            const convState = callData?.state || callData?.conversationState || resumeData?.vapi_conversation_state || null;
+            fetch(`${API_BASE}/api/session-start`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                session_token: sessionToken,
+                vapi_call_id: callId,
+                conversation_state: convState,
+              }),
+            }).catch(() => {});
+          }
           setTimeout(async () => {
             await setupFaceProctoring();
             startFaceProctoring();
           }, PROCTORING_BOOT_DELAY_MS);
-          const sessionToken = getParam("session");
           heartbeatInterval = setInterval(() => {
             const transcript = Array.from(document.querySelectorAll(".transcript-entry .text")).map(el => el.textContent).join("\n");
             fetch(`${API_BASE}/api/session-heartbeat`, {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ session_token: sessionToken, transcript_so_far: transcript }),
             }).catch(() => {});
-          }, 30000);
+          }, 5000);
         });
 
         vapi.on("call-end", (callData) => {
@@ -578,7 +611,13 @@ export default function InterviewPage() {
               body: JSON.stringify({ recordingUrl: vapiRecordingUrl, sessionToken: getParam("session") || "" }),
             }).catch(() => {});
           }
-          try { localStorage.setItem(LS_DISCONNECT_AT, String(Date.now())); } catch (_) {}
+          if (sessionToken) {
+            fetch(`${API_BASE}/api/session-disconnect`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ session_token: sessionToken }),
+            }).catch(() => {});
+          }
           endCall();
         });
 
@@ -602,14 +641,17 @@ export default function InterviewPage() {
         vapi.on("error", (err) => {
           setStatus("Connection error: " + (err.message || JSON.stringify(err)));
           if (statusOverlay) statusOverlay.style.display = "flex";
-          try { localStorage.setItem(LS_DISCONNECT_AT, String(Date.now())); } catch (_) {}
+          if (sessionToken) {
+            fetch(`${API_BASE}/api/session-disconnect`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ session_token: sessionToken }),
+            }).catch(() => {});
+          }
           // simple retry once after 3s
           setTimeout(() => {
-            const lastDiscNow = Number(localStorage.getItem(LS_DISCONNECT_AT) || "0");
-            if (Date.now() - lastDiscNow <= REJOIN_WINDOW_MS) {
-              setStatus("Reconnecting...");
-              startInterview();
-            }
+            setStatus("Reconnecting...");
+            startInterview();
           }, 3000);
         });
 
