@@ -110,31 +110,51 @@ export async function GET(request, { params }) {
       return new Response(recording_data, { headers });
     }
 
-    const recordingsDir = process.env.RECORDINGS_DIR || path.join(process.cwd(), "recordings");
+    const recordingsDir = process.env.RECORDINGS_DIR || "/app/next-app/recordings";
     const recordingsRoot = path.resolve(recordingsDir);
-    const fullPath = path.resolve(recordingsRoot, recording_path);
 
-    if (!fullPath.startsWith(recordingsRoot + path.sep) && fullPath !== recordingsRoot) {
-      return withCors(NextResponse.json({ error: "Invalid recording path" }, { status: 400 }));
+    const safeResolve = (relativePath) => {
+      if (!relativePath) return null;
+      const resolved = path.resolve(recordingsRoot, relativePath);
+      if (!resolved.startsWith(recordingsRoot + path.sep) && resolved !== recordingsRoot) return null;
+      return resolved;
+    };
+
+    const candidates = [
+      { rel: `${sessionToken}.mp4`, format: "mp4" },
+      { rel: `${sessionToken}.webm`, format: "webm" },
+      { rel: recording_path, format: recording_format || (recording_path?.endsWith(".mp4") ? "mp4" : "webm") },
+    ];
+
+    let fullPath = null;
+    let effectiveFormat = recording_format;
+
+    for (const c of candidates) {
+      const resolved = safeResolve(c.rel);
+      if (resolved && fs.existsSync(resolved)) {
+        fullPath = resolved;
+        effectiveFormat = c.format || effectiveFormat;
+        break;
+      }
     }
-    // Debug: log which instance is serving and which path it's using
-    console.log("[recording] host:", process.env.HOSTNAME || "unknown",
-                "cwd:", process.cwd(),
-                "file:", fullPath,
-                "exists:", fs.existsSync(fullPath));
 
-    console.log("[recording] file check", { fullPath, exists: fs.existsSync(fullPath) });
-
-    if (!fs.existsSync(fullPath)) {
-      return withCors(NextResponse.json({ error: "Recording file not found" }, { status: 404 }));
+    if (!fullPath) {
+      return withCors(NextResponse.json({ error: "Recording not available or not ready yet" }, { status: 404 }));
     }
+
+    console.log("[recording] lookup", {
+      sessionToken,
+      candidates: candidates.map(c => c.rel),
+      found: fullPath,
+      exists: fs.existsSync(fullPath)
+    });
 
     const stat = fs.statSync(fullPath);
     const fileSize = stat.size;
     const rangeHeader = request.headers.get("range");
 
     const headers = new Headers();
-    headers.set("Content-Type", recording_format === "mp4" ? "video/mp4" : "video/webm");
+    headers.set("Content-Type", effectiveFormat === "mp4" ? "video/mp4" : "video/webm");
     headers.set("Accept-Ranges", "bytes");
     headers.set("Content-Length", fileSize.toString());
 
@@ -161,6 +181,7 @@ export async function GET(request, { params }) {
       }
     }
 
+    headers.set("Content-Range", `bytes 0-${fileSize - 1}/${fileSize}`);
     const stream = fs.createReadStream(fullPath);
     return new Response(stream, { headers });
 
@@ -170,8 +191,6 @@ export async function GET(request, { params }) {
   }
 }
 
-// Mirror GET for HEAD while reusing auth/headers logic but omitting body.
 export async function HEAD(request, ctx) {
-  const res = await GET(request, ctx);
-  return new Response(null, { status: res.status, statusText: res.statusText, headers: res.headers });
+  return GET(request, ctx);
 }
