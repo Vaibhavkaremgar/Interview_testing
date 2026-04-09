@@ -695,7 +695,7 @@ export default function InterviewPage() {
         <div className="brand">
           <div className="brand-icon">P</div>
           <div className="brand-text">
-            <div className="brand-name">RecruitAI</div>
+            <div className="brand-name">Pontis AI</div>
             <div className="brand-sub">AI Interview Portal</div>
           </div>
         </div>

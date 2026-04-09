@@ -2,20 +2,20 @@
 html, body { height: 100%; overflow: hidden; }
 
 :root {
-  --bg-start: #0c0d16;
-  --bg-end: #121528;
-  --panel: #121423;
-  --panel-border: #1d2032;
-  --text-main: #e8ebf7;
-  --text-sub: #9aa1bd;
-  --accent: #b18cff;
-  --accent-strong: #7a4bff;
-  --bubble-ai: #6f5bd7;
-  --bubble-user: #3568e8;
+  --bg-start: #082330;
+  --bg-end: #0a1b24;
+  --panel: #0f1822;
+  --panel-border: #122131;
+  --text-main: #e8f3fb;
+  --text-sub: #96a9bd;
+  --accent: #4fd1c5;
+  --accent-strong: #2fb2c0;
+  --bubble-ai: #2563eb;
+  --bubble-user: #0ea5e9;
 }
 
 body {
-  background: radial-gradient(120% 120% at 20% 20%, #1a1d2d 0%, #0b0c14 45%, #0b0c14 100%), linear-gradient(160deg, var(--bg-start), var(--bg-end));
+  background: radial-gradient(120% 120% at 20% 20%, #0f3347 0%, #081420 45%, #081420 100%), linear-gradient(160deg, var(--bg-start), var(--bg-end));
   color: var(--text-main);
   font-family: "Google Sans", "Inter", system-ui, -apple-system, sans-serif;
   min-height: 100vh;
