@@ -180,6 +180,8 @@
   }
   .time-btn:hover { border-color: #1a73e8; background: #e8f0fe; }
   .time-btn.selected { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .time-btn:disabled { background: #f8f9fa; color: #9aa0a6; border-color: #e0e0e0; cursor: not-allowed; }
+  .slot-full-label { display: block; font-size: 0.75rem; color: #c5221f; margin-top: 4px; }
 
   .no-slots-msg {
     color: #5f6368;
@@ -296,6 +298,14 @@
     max-height: 180px;
     overflow: auto;
   }
+  @media (max-width: 720px) {
+    body { padding: 16px; align-items: flex-start; }
+    .container { max-width: 100%; }
+    .body { flex-direction: column; }
+    .cal-panel { width: 100%; border-right: none; border-bottom: 1px solid #e8eaed; }
+    .time-panel { width: 100%; }
+    .time-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
   @media (max-width: 820px) {
     .details-grid { grid-template-columns: 1fr; }
   }
@@ -388,6 +398,8 @@ let selectedSlot = null;
 let viewYear     = new Date().getFullYear();
 let viewMonth    = new Date().getMonth();
 let serverTodayStr = localDateStr(new Date());
+let serverNowIso = null;
+let serverNowMinutes = null;
 
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const MONTHS = ["January","February","March","April","May","June",
@@ -428,6 +440,8 @@ async function loadSlots() {
     const data = await res.json();
     if (!data.success) throw new Error(data.error || "Failed to load slots");
     const serverNow = data.server_now_iso ? new Date(data.server_now_iso) : new Date();
+    serverNowIso = serverNow.toISOString();
+    serverNowMinutes = serverNow.getHours() * 60 + serverNow.getMinutes();
     serverTodayStr = data.server_date || localDateStr(serverNow);
 
     slotsByDate = {};
@@ -497,15 +511,24 @@ function selectDate(dateStr) {
 }
 
 function renderTimeSlots(dateStr) {
-  const slots     = slotsByDate[dateStr] || [];
+  let slots       = slotsByDate[dateStr] || [];
   const heading   = document.getElementById("dateHeading");
   const container = document.getElementById("timeSlots");
+  const isToday   = dateStr === serverTodayStr;
+
+  if (isToday && serverNowMinutes !== null) {
+    slots = slots.filter(slot => {
+      const [h, m] = slot.slot_time.split(":").map(Number);
+      return (h * 60 + m) > serverNowMinutes;
+    });
+  }
 
   const d = new Date(dateStr + "T00:00:00");
   heading.innerHTML = `<span>${d.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</span>`;
 
   if (!slots.length) {
-    container.innerHTML = '<div class="no-slots-msg" style="grid-column:1/-1">No available slots on this date</div>';
+    const msg = isToday ? "No remaining slots today" : "No available slots on this date";
+    container.innerHTML = `<div class="no-slots-msg" style="grid-column:1/-1">${msg}</div>`;
     return;
   }
 
@@ -513,9 +536,16 @@ function renderTimeSlots(dateStr) {
   slots.forEach(slot => {
     const btn       = document.createElement("button");
     btn.className   = "time-btn";
-    btn.textContent = formatTime(slot.slot_time);
+    const isFull    = typeof slot.available === "number" && slot.available <= 0;
+    btn.innerHTML   = `<div>${formatTime(slot.slot_time)}</div>`;
+    if (isFull) {
+      btn.disabled = true;
+      btn.innerHTML += `<div class="slot-full-label">Slot full. Choose another slot</div>`;
+    }
     if (selectedSlot && selectedSlot.slot_id === slot.slot_id) btn.classList.add("selected");
-    btn.addEventListener("click", () => selectSlot(slot, btn));
+    if (!isFull) {
+      btn.addEventListener("click", () => selectSlot(slot, btn));
+    }
     container.appendChild(btn);
   });
 }

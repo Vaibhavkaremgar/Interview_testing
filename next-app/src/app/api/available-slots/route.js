@@ -28,12 +28,11 @@ export async function GET() {
       const { rows } = await client.query(
         `SELECT id, slot_date::text, slot_time, max_concurrent, current_bookings
          FROM interview_slots
-         WHERE current_bookings < max_concurrent
-           AND (
-             (slot_date = $1 AND slot_time >= $4)
-             OR slot_date = $2
-             OR slot_date = $3
-           )
+         WHERE (
+           (slot_date = $1 AND slot_time >= $4)
+           OR slot_date = $2
+           OR slot_date = $3
+         )
          ORDER BY slot_date, slot_time`,
         [todayStr, day1Str, day2Str, currentTime]
       );
