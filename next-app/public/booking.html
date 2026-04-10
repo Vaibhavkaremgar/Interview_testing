@@ -305,6 +305,9 @@
     .cal-panel { width: 100%; border-right: none; border-bottom: 1px solid #e8eaed; }
     .time-panel { width: 100%; }
     .time-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .candidate-badge { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .candidate-badge .badge-sep { display: none; }
+    #badgeName, #badgeEmail { display: block; }
   }
   @media (max-width: 820px) {
     .details-grid { grid-template-columns: 1fr; }
@@ -322,7 +325,7 @@
     <div class="candidate-badge" id="candidateBadge" style="display:none">
       <span>Candidate</span>
       <span id="badgeName"></span>
-      <span style="opacity:0.6">&middot;</span>
+      <span class="badge-sep" style="opacity:0.6">&middot;</span>
       <span id="badgeEmail" style="opacity:0.85"></span>
     </div>
   </div>
