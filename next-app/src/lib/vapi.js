@@ -3,7 +3,9 @@ import { pool, DB_READY } from "./db.js";
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
-const sessions = {};
+const sessionsByToken = new Map();
+const callToToken = new Map();
+const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS || 45000);
 
 function normalizeRole(role) {
   return (role || "").toString().trim().toLowerCase();
@@ -14,9 +16,10 @@ function isTranscriptRoleAllowed(role) {
   return r === "user" || r === "assistant" || r === "bot";
 }
 
-function getSession(callId) {
-  if (!sessions[callId]) {
-    sessions[callId] = {
+function getSessionByToken(token) {
+  const t = token || "default";
+  if (!sessionsByToken.has(t)) {
+    sessionsByToken.set(t, {
       resumeText: "",
       jdText: "",
       candidateName: "there",
@@ -26,12 +29,56 @@ function getSession(callId) {
       userId: "",
       candidateId: "",
       jobId: "",
-      asyncToken: "",
-      conversationHistory: [],
+      asyncToken: token || "",
+      transcript: [],
       metadataLoaded: false,
-    };
+      lastTranscriptAt: 0,
+      pendingEnd: false,
+      finalizeTimer: null,
+      recordingUrl: null,
+    });
   }
-  return sessions[callId];
+  return sessionsByToken.get(t);
+}
+
+function attachCallToToken(callId, token) {
+  if (!callId || !token) return;
+  const existingToken = callToToken.get(callId);
+  if (existingToken && existingToken !== token) {
+    // Merge old session into new token to keep transcripts continuous.
+    const oldSession = sessionsByToken.get(existingToken);
+    const newSession = getSessionByToken(token);
+    if (oldSession && newSession && oldSession !== newSession) {
+      newSession.transcript.push(...oldSession.transcript);
+      newSession.lastTranscriptAt = Math.max(newSession.lastTranscriptAt, oldSession.lastTranscriptAt || 0);
+      newSession.resumeText = newSession.resumeText || oldSession.resumeText;
+      newSession.jdText = newSession.jdText || oldSession.jdText;
+      newSession.candidateName = newSession.candidateName || oldSession.candidateName;
+      newSession.email = newSession.email || oldSession.email;
+      newSession.jobRole = newSession.jobRole || oldSession.jobRole;
+      newSession.agencyId = newSession.agencyId || oldSession.agencyId;
+      newSession.userId = newSession.userId || oldSession.userId;
+      newSession.candidateId = newSession.candidateId || oldSession.candidateId;
+      newSession.jobId = newSession.jobId || oldSession.jobId;
+      newSession.asyncToken = newSession.asyncToken || oldSession.asyncToken;
+      if (oldSession.finalizeTimer) {
+        clearTimeout(oldSession.finalizeTimer);
+        newSession.finalizeTimer = oldSession.finalizeTimer;
+      }
+      sessionsByToken.delete(existingToken);
+    }
+  }
+  callToToken.set(callId, token);
+}
+
+function resolveToken(body, callId) {
+  const v =
+    body?.message?.call?.assistantOverrides?.variableValues ||
+    body?.message?.call?.metadata ||
+    body?.call?.metadata ||
+    {};
+  const token = v.session || v.sessionToken || v.asyncToken || body?.sessionToken || "";
+  return token || callId || "default";
 }
 
 function extractCandidateData(body) {
@@ -111,28 +158,42 @@ Return ONLY a valid JSON array of 8 question strings. No markdown, no explanatio
   return fallback;
 }
 
+function buildInsufficientDataEvaluation(transcriptWordCount = 0) {
+  return {
+    communication: 0,
+    technical_depth: 0,
+    problem_solving: 0,
+    confidence: 0,
+    overall_score: 0,
+    summary: transcriptWordCount === 0
+      ? "No usable interview answers were captured; scoring skipped."
+      : "Transcript is too short to evaluate; scoring skipped.",
+    strengths: "Insufficient transcript content.",
+    weaknesses: "No substantive answers to evaluate.",
+    decision: "REVIEW",
+  };
+}
+
 async function evaluateCandidate(session, transcript) {
+  const transcriptWordCount = (transcript || "").trim().split(/\s+/).filter(Boolean).length;
+  if (transcriptWordCount < 20) {
+    return buildInsufficientDataEvaluation(transcriptWordCount);
+  }
+
   const raw = await callGroq(
-    `You are a hiring manager. Evaluate the interview transcript.
+    `You are a hiring manager evaluating ONLY the interview transcript.
+- Base every score strictly on what the candidate said in the transcript.
+- Use resume/JD only as context; do NOT award points for skills not evidenced in the transcript.
+- If the transcript lacks evidence for a criterion, keep that score low.
 Return ONLY valid JSON (no markdown):
 {"communication":<1-10>,"technical_depth":<1-10>,"problem_solving":<1-10>,"confidence":<1-10>,"overall_score":<1-10>,"summary":"...","strengths":"...","weaknesses":"...","decision":"PASS|FAIL|REVIEW"}`,
-    `RESUME:\n${session.resumeText || "Not provided"}\n\nJOB DESCRIPTION:\n${session.jdText || "Not provided"}\n\nTRANSCRIPT:\n${transcript}`,
+    `RESUME (context only):\n${session.resumeText || "Not provided"}\n\nJOB DESCRIPTION (context only):\n${session.jdText || "Not provided"}\n\nTRANSCRIPT (primary evidence):\n${transcript}`,
     500
   );
   try {
     return JSON.parse(raw.replace(/```json|```/g, "").trim());
   } catch {
-    return {
-      communication: 7,
-      technical_depth: 7,
-      problem_solving: 7,
-      confidence: 7,
-      overall_score: 7,
-      summary: "Interview completed.",
-      strengths: "Good communication.",
-      weaknesses: "More specific examples needed.",
-      decision: "maybe",
-    };
+    return buildInsufficientDataEvaluation(transcriptWordCount);
   }
 }
 
@@ -196,56 +257,115 @@ async function saveEvaluation(session, evaluation, transcript, recordingUrl = nu
   }
 }
 
+function buildTranscriptText(session) {
+  return session.transcript
+    .filter(e => isTranscriptRoleAllowed(e.role) && (e.content || "").trim().length > 0)
+    .map(e => `${normalizeRole(e.role).toUpperCase()}: ${e.content}`)
+    .join("\n\n");
+}
+
+async function persistSnapshot(session) {
+  if (!DB_READY || !pool) return;
+  if (!session.asyncToken) return;
+  const snapshot = buildTranscriptText(session);
+  try {
+    await pool.query(
+      `UPDATE interview_sessions SET last_transcript_snapshot = $1, last_activity_at = NOW() WHERE session_token = $2`,
+      [snapshot, session.asyncToken]
+    );
+  } catch (e) {
+    console.warn("Could not persist transcript snapshot:", e.message);
+  }
+}
+
+function scheduleFinalize(token, session) {
+  if (session.finalizeTimer) clearTimeout(session.finalizeTimer);
+  session.finalizeTimer = setTimeout(() => finalizeSession(token).catch(() => {}), RECONNECT_GRACE_MS);
+  session.finalizeTimer.unref?.();
+}
+
+async function finalizeSession(token) {
+  const session = sessionsByToken.get(token);
+  if (!session || !session.pendingEnd) return;
+
+  const transcript = buildTranscriptText(session);
+  const evaluation = await evaluateCandidate(session, transcript);
+  await saveEvaluation(session, evaluation, transcript, session.recordingUrl);
+
+  if (session.finalizeTimer) clearTimeout(session.finalizeTimer);
+  sessionsByToken.delete(token);
+  // Clean up any call mappings for this token
+  for (const [cid, t] of Array.from(callToToken.entries())) {
+    if (t === token) callToToken.delete(cid);
+  }
+}
+
 async function processWebhook(body) {
   try {
     const messageType = body?.message?.type || body?.type;
     const callId = body?.message?.call?.id || body?.call?.id || "default";
-
-    const session = getSession(callId);
+    const token = resolveToken(body, callId);
+    attachCallToToken(callId, token);
+    const session = getSessionByToken(token);
+    session.asyncToken = session.asyncToken || (token !== "default" ? token : "");
 
     if (!session.metadataLoaded) {
       const data = extractCandidateData(body);
       if (data.candidateName || data.resume) {
-        session.resumeText = data.resume || "";
-        session.jdText = data.jobDescription || "";
-        session.candidateName = data.candidateName || "there";
-        session.email = data.email || "";
-        session.jobRole = data.jobRole || "";
-        session.agencyId = data.agencyId || "";
-        session.userId = data.userId || "";
-        session.candidateId = data.candidateId || "";
-        session.jobId = data.jobId || "";
+        session.resumeText = data.resume || session.resumeText || "";
+        session.jdText = data.jobDescription || session.jdText || "";
+        session.candidateName = data.candidateName || session.candidateName || "there";
+        session.email = data.email || session.email || "";
+        session.jobRole = data.jobRole || session.jobRole || "";
+        session.agencyId = data.agencyId || session.agencyId || "";
+        session.userId = data.userId || session.userId || "";
+        session.candidateId = data.candidateId || session.candidateId || "";
+        session.jobId = data.jobId || session.jobId || "";
         session.metadataLoaded = true;
       }
     }
 
-    if (messageType === "assistant-request") return;
-    if (messageType === "tool-calls") return;
+    if (messageType === "assistant-request" || messageType === "tool-calls") return;
 
     if (messageType === "transcript") {
       const role = body?.message?.role || "unknown";
       const text = body?.message?.transcript || "";
       if (text.trim() && isTranscriptRoleAllowed(role)) {
-        session.conversationHistory.push({ role, content: text });
+        session.transcript.push({ role, content: text });
+        session.lastTranscriptAt = Date.now();
+        await persistSnapshot(session);
+        if (session.pendingEnd) {
+          // A reconnection delivered more transcript; delay finalize.
+          scheduleFinalize(token, session);
+        }
       }
       return;
     }
 
     if (messageType === "end-of-call-report") {
       const vapiMessages = body?.message?.artifact?.messages || [];
-      const transcript = vapiMessages.length
-        ? vapiMessages
-            .filter(m => m.message && m.message.trim().length > 0 && isTranscriptRoleAllowed(m.role))
-            .map(m => `${normalizeRole(m.role).toUpperCase()}: ${m.message}`).join("\n\n")
-        : session.conversationHistory
-            .filter(e => isTranscriptRoleAllowed(e.role))
-            .map(e => `${normalizeRole(e.role).toUpperCase()}: ${e.content}`).join("\n\n");
+      if (vapiMessages.length) {
+        for (const m of vapiMessages) {
+          const role = m.role || "unknown";
+          const text = m.message || "";
+          if (text.trim() && isTranscriptRoleAllowed(role)) {
+            session.transcript.push({ role, content: text });
+          }
+        }
+        session.lastTranscriptAt = Date.now();
+        await persistSnapshot(session);
+      }
 
       const asyncToken =
         body?.message?.call?.assistantOverrides?.variableValues?.session ||
         body?.message?.call?.assistantOverrides?.variableValues?.sessionToken ||
-        body?.message?.call?.metadata?.sessionToken || "";
-      if (asyncToken) session.asyncToken = asyncToken;
+        body?.message?.call?.metadata?.sessionToken ||
+        session.asyncToken ||
+        "";
+      if (asyncToken) {
+        session.asyncToken = asyncToken;
+        attachCallToToken(callId, asyncToken);
+      }
 
       if (asyncToken && DB_READY && pool) {
         try {
@@ -273,10 +393,9 @@ async function processWebhook(body) {
         ).catch(e => console.warn("Could not save vapi_recording_url:", e.message));
       }
 
-      const evaluation = await evaluateCandidate(session, transcript);
-      await saveEvaluation(session, evaluation, transcript, recordingUrl);
-
-      delete sessions[callId];
+      session.pendingEnd = true;
+      session.recordingUrl = recordingUrl || session.recordingUrl;
+      scheduleFinalize(token, session);
     }
   } catch (e) {
     console.error("Webhook processing failed:", e.message, e.stack);

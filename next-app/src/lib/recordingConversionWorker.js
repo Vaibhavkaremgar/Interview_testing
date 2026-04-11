@@ -1,8 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
-import ffmpegStatic from "ffmpeg-static";
-import ffprobeStatic from "ffprobe-static";
+import { spawn, spawnSync } from "child_process";
 import { pool, DB_READY } from "./db.js";
 
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || path.join(process.cwd(), "recordings");
@@ -10,12 +8,47 @@ const FINALIZE_INACTIVE_MS = 30000;
 const FINALIZE_SWEEP_MS = 60000;
 const CONVERT_SWEEP_MS = 30000;
 const MAX_CONVERT_RETRIES = 10;
-const FFMPG_BIN = ffmpegStatic || "ffmpeg";
-const FFPROBE_BIN = (ffprobeStatic && (ffprobeStatic.path || ffprobeStatic.ffprobePath)) || "ffprobe";
+const FFMPEG_ENV = process.env.FFMPEG_BIN || process.env.FFMPG_BIN || "";
+const FFPROBE_ENV = process.env.FFPROBE_BIN || "";
 
 let workerStarted = false;
 let converting = false;
+let resolvedFFmpeg = null;
+let resolvedFFprobe = null;
 const pending = new Set();
+
+function detectBinary(candidates = [], name = "binary") {
+  for (const bin of candidates.filter(Boolean)) {
+    try {
+      const res = spawnSync(bin, ["-version"], { stdio: "pipe" });
+      if (res.status === 0) return bin;
+    } catch {
+      // ignore and try next
+    }
+  }
+  return null;
+}
+
+function ensureBinaries() {
+  if (!resolvedFFmpeg) {
+    resolvedFFmpeg = detectBinary([FFMPEG_ENV, "ffmpeg"], "ffmpeg");
+    if (!resolvedFFmpeg) {
+      console.error("[recording] FFmpeg not available. Set FFMPEG_BIN or install system ffmpeg.");
+    } else {
+      const v = spawnSync(resolvedFFmpeg, ["-version"], { stdio: "pipe", encoding: "utf8" });
+      console.info("[recording] FFmpeg detected:", resolvedFFmpeg, (v?.stdout || "").split("\n")[0] || "");
+    }
+  }
+  if (!resolvedFFprobe) {
+    resolvedFFprobe = detectBinary([FFPROBE_ENV, "ffprobe"], "ffprobe");
+    if (!resolvedFFprobe) {
+      console.warn("[recording] ffprobe not available; duration metadata will be zero. Set FFPROBE_BIN or install ffprobe.");
+    } else {
+      const v = spawnSync(resolvedFFprobe, ["-version"], { stdio: "pipe", encoding: "utf8" });
+      console.info("[recording] ffprobe detected:", resolvedFFprobe, (v?.stdout || "").split("\n")[0] || "");
+    }
+  }
+}
 
 function ensureDir() {
   if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -43,8 +76,9 @@ function saveState(statePath, state) {
 }
 
 async function convertToMp4(inputPath, outputPath) {
+  if (!resolvedFFmpeg) throw new Error("FFmpeg unavailable");
   return new Promise((resolve, reject) => {
-    const ffmpeg = spawn(FFMPG_BIN, [
+    const ffmpeg = spawn(resolvedFFmpeg, [
       "-i", inputPath,
       "-c:v", "libx264",
       "-preset", "fast",
@@ -61,8 +95,9 @@ async function convertToMp4(inputPath, outputPath) {
 }
 
 async function getVideoDuration(filePath) {
+  if (!resolvedFFprobe) return 0;
   return new Promise((resolve) => {
-    const ffprobe = spawn(FFPROBE_BIN, ["-v", "quiet", "-print_format", "json", "-show_format", filePath]);
+    const ffprobe = spawn(resolvedFFprobe, ["-v", "quiet", "-print_format", "json", "-show_format", filePath]);
     let output = "";
     ffprobe.stdout.on("data", (data) => { output += data.toString(); });
     ffprobe.on("close", (code) => {
@@ -241,6 +276,7 @@ function queueConversion(sessionToken) {
 function startRecordingConversionWorker() {
   if (workerStarted) return;
   workerStarted = true;
+  ensureBinaries();
   ensureDir();
   // Startup sweep
   finalizeSweep().catch(() => {});
