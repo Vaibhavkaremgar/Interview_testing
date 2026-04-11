@@ -13,6 +13,7 @@ const FFPROBE_ENV = process.env.FFPROBE_BIN || "";
 
 let workerStarted = false;
 let converting = false;
+const convertingSessions = new Set();
 let resolvedFFmpeg = null;
 let resolvedFFprobe = null;
 const pending = new Set();
@@ -97,6 +98,7 @@ async function convertToMp4(inputPath, outputPath) {
     const ff = spawn(ffmpegPath, [
       "-y",
       "-i", inputPath,
+      "-r", "30",
       "-c:v", "libx264",
       "-c:a", "aac",
       outputPath,
@@ -194,67 +196,75 @@ async function finalizeSession(sessionToken, reason = "idle") {
 }
 
 async function convertSession(sessionToken) {
-  const paths = sessionPaths(sessionToken);
-  const state = loadState(paths.state);
+  if (convertingSessions.has(sessionToken)) return;
+  convertingSessions.add(sessionToken);
+  console.log("starting conversion", sessionToken);
+  try {
+    const paths = sessionPaths(sessionToken);
+    const state = loadState(paths.state);
 
-  // Ensure webm exists; try merge pending parts before "finalizing".
-  mergeAvailableParts(sessionToken);
+    // Ensure webm exists; try merge pending parts before "finalizing".
+    mergeAvailableParts(sessionToken);
 
-  if (!fs.existsSync(paths.webm)) return;
+    if (!fs.existsSync(paths.webm)) return;
 
-  const webmDuration = await getVideoDuration(paths.webm);
-  const webmStats = fs.statSync(paths.webm);
-  let mp4Stats = null;
-  let mp4Duration = 0;
-  console.log("webm created:", paths.webm);
+    const webmDuration = await getVideoDuration(paths.webm);
+    const webmStats = fs.statSync(paths.webm);
+    let mp4Stats = null;
+    let mp4Duration = 0;
+    console.log("webm created:", paths.webm);
 
-  if (!fs.existsSync(paths.mp4) || fs.statSync(paths.mp4).mtimeMs < webmStats.mtimeMs) {
-    try {
-      console.log("converting to mp4", { sessionToken });
-      await convertToMp4(paths.webm, paths.mp4);
-      mp4Stats = fs.existsSync(paths.mp4) ? fs.statSync(paths.mp4) : null;
-      if (mp4Stats) mp4Duration = await getVideoDuration(paths.mp4);
-      if (mp4Stats) console.log("mp4 created:", paths.mp4);
-    } catch (e) {
-      console.error("[recording] mp4 conversion failed", { sessionToken, error: e.message });
+    if (!fs.existsSync(paths.mp4) || fs.statSync(paths.mp4).mtimeMs < webmStats.mtimeMs) {
+      try {
+        console.log("converting to mp4", { sessionToken });
+        await convertToMp4(paths.webm, paths.mp4);
+        mp4Stats = fs.existsSync(paths.mp4) ? fs.statSync(paths.mp4) : null;
+        if (mp4Stats) mp4Duration = await getVideoDuration(paths.mp4);
+        if (mp4Stats) console.log("mp4 created:", paths.mp4);
+      } catch (e) {
+        console.error("[recording] mp4 conversion failed", { sessionToken, error: e.message });
+      }
+    } else {
+      mp4Stats = fs.statSync(paths.mp4);
+      mp4Duration = await getVideoDuration(paths.mp4);
     }
-  } else {
-    mp4Stats = fs.statSync(paths.mp4);
-    mp4Duration = await getVideoDuration(paths.mp4);
-  }
 
-  const finalPath = mp4Stats ? path.basename(paths.mp4) : path.basename(paths.webm);
-  const finalSize = mp4Stats ? mp4Stats.size : webmStats.size;
-  const finalDuration = mp4Stats ? (mp4Duration || webmDuration) : webmDuration;
-  const finalFormat = mp4Stats ? "mp4" : "webm";
+    const finalPath = mp4Stats ? path.basename(paths.mp4) : path.basename(paths.webm);
+    const finalSize = mp4Stats ? mp4Stats.size : webmStats.size;
+    const finalDuration = mp4Stats ? (mp4Duration || webmDuration) : webmDuration;
+    const finalFormat = mp4Stats ? "mp4" : "webm";
 
-  if (DB_READY && pool) {
-    try {
-      await pool.query(
-        `UPDATE interview_sessions
-           SET recording_path = $1,
-               recording_size_bytes = $2,
-               recording_duration_seconds = $3,
-               recording_format = $4,
-               recording_data = NULL,
-               recording_created_at = COALESCE(recording_created_at, NOW())
-         WHERE session_token = $5`,
-        [finalPath, finalSize, finalDuration, finalFormat, sessionToken]
-      );
-    } catch (e) {
-      console.warn("[recording] DB update failed", { sessionToken, error: e.message });
+    if (DB_READY && pool) {
+      try {
+        await pool.query(
+          `UPDATE interview_sessions
+             SET recording_path = $1,
+                 recording_size_bytes = $2,
+                 recording_duration_seconds = $3,
+                 recording_format = $4,
+                 recording_data = NULL,
+                 recording_created_at = COALESCE(recording_created_at, NOW())
+           WHERE session_token = $5`,
+          [finalPath, finalSize, finalDuration, finalFormat, sessionToken]
+        );
+      } catch (e) {
+        console.warn("[recording] DB update failed", { sessionToken, error: e.message });
+      }
     }
-  }
 
-  console.log("[recording] webm finalized", {
-    sessionToken,
-    webmDuration,
-    webmSize: webmStats.size,
-    mp4Duration,
-    mp4Size: mp4Stats?.size || null,
-    format: finalFormat,
-  });
-  cleanup(sessionToken);
+    console.log("conversion completed", sessionToken);
+    console.log("[recording] webm finalized", {
+      sessionToken,
+      webmDuration,
+      webmSize: webmStats.size,
+      mp4Duration,
+      mp4Size: mp4Stats?.size || null,
+      format: finalFormat,
+    });
+    cleanup(sessionToken);
+  } finally {
+    convertingSessions.delete(sessionToken);
+  }
 }
 
 function cleanup(sessionToken) {
