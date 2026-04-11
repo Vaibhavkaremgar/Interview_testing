@@ -4,7 +4,7 @@ import path from "path";
 import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
 import { startRecordingRetryLoop } from "@/lib/recordingRetry.js";
-import { startRecordingConversionWorker, queueConversion } from "@/lib/recordingConversionWorker.js";
+import { startRecordingConversionWorker, queueConversion, finalizeSession } from "@/lib/recordingConversionWorker.js";
 
 export const runtime = "nodejs";
 
@@ -17,11 +17,24 @@ const AUTO_FINALIZE_MS = 90000; // auto-finish if no chunks arrive for 90s
 startRecordingConversionWorker();
 
 export async function POST(request) {
-  const formData = await request.formData();
-  const chunk = formData.get("chunk");
-  const sessionToken = (formData.get("sessionToken") || "").toString();
-  const chunkIndexRaw = (formData.get("chunkIndex") || "").toString();
-  const isFinal = (formData.get("final") || "").toString() === "1";
+  let formData = null;
+  try {
+    formData = await request.formData();
+  } catch (e) {
+    console.log("[Recording] no formData on request");
+  }
+
+  const { searchParams } = new URL(request.url);
+
+  const chunk = formData?.get("chunk");
+  const sessionToken = ((formData?.get("sessionToken")) || searchParams.get("sessionToken") || "").toString();
+  const chunkIndexRaw = (formData?.get("chunkIndex") || "").toString();
+  const isFinal = (formData?.get("final") || searchParams.get("final") || "").toString() === "1";
+
+  if (isFinal && sessionToken) {
+    await finalizeSession(sessionToken, "client-final");
+    return withCors(NextResponse.json({ success: true, final: true }));
+  }
 
   if (!sessionToken) {
     return withCors(NextResponse.json({ success: false, message: "Invalid session" }, { status: 400 }));
@@ -63,6 +76,8 @@ export async function POST(request) {
       console.error(`Failed to write chunk ${idx}:`, err.message);
       throw err;
     }
+  } else {
+    return withCors(NextResponse.json({ success: true, appendedChunks: 0, appendedBytes: 0, nextIndex: state.nextIndex, final: isFinal }));
   }
 
   const canMerge = !state.merging;
