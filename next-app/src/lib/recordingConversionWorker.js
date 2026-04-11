@@ -180,12 +180,27 @@ async function convertSession(sessionToken) {
   console.log("[recording] conversion retry", { sessionToken, attempt: state.conversionAttempts });
 
   try {
+    const webmDuration = await getVideoDuration(paths.webm);
     await convertToMp4(paths.webm, paths.mp4);
     if (!fs.existsSync(paths.mp4)) throw new Error("mp4 missing after ffmpeg");
 
-    const duration = await getVideoDuration(paths.mp4);
-    const stats = fs.statSync(paths.mp4);
-    const fileName = path.basename(paths.mp4);
+    const mp4Duration = await getVideoDuration(paths.mp4);
+    const mp4Stats = fs.statSync(paths.mp4);
+    const webmStats = fs.statSync(paths.webm);
+
+    const durationsClose = webmDuration === 0 || mp4Duration === 0
+      ? true
+      : Math.abs(mp4Duration - webmDuration) <= 2;
+
+    const useMp4 = durationsClose && mp4Duration >= Math.max(webmDuration - 2, 0);
+    const chosenPath = useMp4 ? paths.mp4 : paths.webm;
+    const chosenFormat = useMp4 ? "mp4" : "webm";
+    const chosenStats = useMp4 ? mp4Stats : webmStats;
+    const chosenDuration = useMp4 ? mp4Duration : webmDuration;
+
+    if (!useMp4) {
+      console.warn("[recording] mp4 shorter than webm; keeping webm", { sessionToken, mp4Duration, webmDuration });
+    }
 
     if (DB_READY && pool) {
       await pool.query(
@@ -193,15 +208,15 @@ async function convertSession(sessionToken) {
            SET recording_path = $1,
                recording_size_bytes = $2,
                recording_duration_seconds = $3,
-               recording_format = 'mp4',
+               recording_format = $4,
                recording_data = NULL,
                recording_created_at = COALESCE(recording_created_at, NOW())
-         WHERE session_token = $4`,
-        [fileName, stats.size, duration, sessionToken]
+         WHERE session_token = $5`,
+        [path.basename(chosenPath), chosenStats.size, chosenDuration, chosenFormat, sessionToken]
       );
     }
 
-    console.log("[recording] conversion success", { sessionToken, duration, size: stats.size });
+    console.log("[recording] conversion success", { sessionToken, chosenFormat, duration: chosenDuration, size: chosenStats.size });
     cleanup(sessionToken);
   } catch (err) {
     console.warn("[recording] conversion failed", { sessionToken, error: err.message });

@@ -23,7 +23,7 @@ export async function GET(request, { params }) {
   try {
     const { rows } = await pool.query(
       `SELECT disconnected_at, connection_status
-            , vapi_call_id, vapi_conversation_state
+            , vapi_call_id, vapi_conversation_state, status, ended_at
          FROM interview_sessions
         WHERE session_token = $1
         LIMIT 1`,
@@ -33,7 +33,20 @@ export async function GET(request, { params }) {
       return withCors(NextResponse.json({ success: false, allowResume: false, error: "Session not found" }, { status: 404 }));
     }
 
-    const { disconnected_at, connection_status, vapi_call_id, vapi_conversation_state } = rows[0];
+    const { disconnected_at, connection_status, vapi_call_id, vapi_conversation_state, status, ended_at } = rows[0];
+    let interviewEnded = false;
+    try {
+      const iv = await pool.query(`SELECT status, async_completed_at FROM interviews WHERE async_token = $1 LIMIT 1`, [sessionToken]);
+      const s = iv.rows?.[0]?.status || status || "";
+      if (["completed", "ended", "failed", "cancelled"].includes(String(s).toLowerCase()) || iv.rows?.[0]?.async_completed_at || ended_at) {
+        interviewEnded = true;
+      }
+    } catch (err) {
+      console.warn("[session] resume status check failed:", err.message);
+    }
+    if (interviewEnded) {
+      return withCors(NextResponse.json({ success: false, allowResume: false, error: "Session ended" }, { status: 410 }));
+    }
     const now = Date.now();
     const discMs = disconnected_at ? now - new Date(disconnected_at).getTime() : null;
     const withinWindow = connection_status === "disconnected" && discMs !== null && discMs < DISCONNECT_EXPIRE_MS;

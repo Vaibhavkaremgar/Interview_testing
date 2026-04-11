@@ -30,7 +30,7 @@ export async function GET(request, { params }) {
   try {
     const { rows } = await client.query(
       `SELECT candidate_name, email, resume_text, job_role, jd_text, agency_id, candidate_id, user_id, job_id,
-              session_token, last_transcript_snapshot, interview_questions, slot_id
+              session_token, last_transcript_snapshot, interview_questions, slot_id, status, ended_at
        FROM interview_sessions
        WHERE session_token = $1`,
       [sessionToken]
@@ -82,6 +82,26 @@ export async function GET(request, { params }) {
       : slotMeta?.slot_date || null;
     const slotTimeStr = slotMeta?.slot_time ? slotMeta.slot_time.toString().slice(0, 8) : null;
     let expired = false;
+
+    // Hard-expire if interview already completed/ended
+    try {
+      const interview = await client.query(
+        `SELECT status, async_completed_at FROM interviews WHERE async_token = $1 LIMIT 1`,
+        [sessionToken]
+      );
+      const status = interview.rows?.[0]?.status || d.status || "";
+      const asyncCompletedAt = interview.rows?.[0]?.async_completed_at || null;
+      const sessionEnded = d.ended_at;
+      if (["completed", "ended", "failed", "cancelled"].includes(String(status).toLowerCase()) || asyncCompletedAt || sessionEnded) {
+        expired = true;
+      }
+    } catch (e) {
+      console.warn("session-info interview status lookup failed:", e.message);
+    }
+
+    if (expired) {
+      return withCors(NextResponse.json({ success: false, error: "Interview session has ended.", expired: true }, { status: 410 }));
+    }
 
     let interviewQuestions = d.interview_questions || [];
     if (typeof interviewQuestions === "string") {

@@ -176,6 +176,15 @@ function buildInsufficientDataEvaluation(transcriptWordCount = 0) {
 
 async function evaluateCandidate(session, transcript) {
   const transcriptWordCount = (transcript || "").trim().split(/\s+/).filter(Boolean).length;
+  const userWordCount = session.transcript
+    .filter(e => normalizeRole(e.role) === "user")
+    .map(e => e.content || "")
+    .join(" ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+
+  if (userWordCount === 0) return buildInsufficientDataEvaluation(0);
   if (transcriptWordCount < 20) {
     return buildInsufficientDataEvaluation(transcriptWordCount);
   }
@@ -260,7 +269,7 @@ async function saveEvaluation(session, evaluation, transcript, recordingUrl = nu
 function buildTranscriptText(session) {
   return session.transcript
     .filter(e => isTranscriptRoleAllowed(e.role) && (e.content || "").trim().length > 0)
-    .map(e => `${normalizeRole(e.role).toUpperCase()}: ${e.content}`)
+    .map(e => `${normalizeRole(e.role === "bot" ? "assistant" : e.role).toUpperCase()}: ${e.content}`)
     .join("\n\n");
 }
 
@@ -300,6 +309,21 @@ async function finalizeSession(token) {
   }
 }
 
+function pushTranscript(session, roleRaw, text) {
+  const role = normalizeRole(roleRaw) === "user" ? "user" : "assistant";
+  const trimmed = (text || "").trim();
+  if (!trimmed) return;
+  const now = Date.now();
+  const last = session.transcript[session.transcript.length - 1];
+  const withinSameUtterance = last && last.role === role && now - (session.lastTranscriptAt || 0) < 5000;
+  if (withinSameUtterance) {
+    last.content = `${last.content} ${trimmed}`.replace(/\s+/g, " ").trim();
+  } else {
+    session.transcript.push({ role, content: trimmed });
+  }
+  session.lastTranscriptAt = now;
+}
+
 async function processWebhook(body) {
   try {
     const messageType = body?.message?.type || body?.type;
@@ -330,14 +354,10 @@ async function processWebhook(body) {
     if (messageType === "transcript") {
       const role = body?.message?.role || "unknown";
       const text = body?.message?.transcript || "";
-      if (text.trim() && isTranscriptRoleAllowed(role)) {
-        session.transcript.push({ role, content: text });
-        session.lastTranscriptAt = Date.now();
+      if (isTranscriptRoleAllowed(role)) {
+        pushTranscript(session, role, text);
         await persistSnapshot(session);
-        if (session.pendingEnd) {
-          // A reconnection delivered more transcript; delay finalize.
-          scheduleFinalize(token, session);
-        }
+        if (session.pendingEnd) scheduleFinalize(token, session);
       }
       return;
     }
@@ -348,11 +368,10 @@ async function processWebhook(body) {
         for (const m of vapiMessages) {
           const role = m.role || "unknown";
           const text = m.message || "";
-          if (text.trim() && isTranscriptRoleAllowed(role)) {
-            session.transcript.push({ role, content: text });
+          if (isTranscriptRoleAllowed(role)) {
+            pushTranscript(session, role, text);
           }
         }
-        session.lastTranscriptAt = Date.now();
         await persistSnapshot(session);
       }
 

@@ -626,7 +626,7 @@ export default function InterviewPage() {
 
         vapi.on("message", (msg) => {
           if (msg.type === "transcript") {
-            const role = msg.role === "assistant" ? "agent" : "user";
+            const role = msg.role === "user" ? "user" : "agent";
             if (msg.transcriptType === "partial") {
               setLiveIndicator(`<span>${role === "agent" ? "AI" : variableValues.candidateName}</span>: ${msg.transcript}`);
               if (role === "user") setCandidateSpeaking(true);
@@ -634,6 +634,11 @@ export default function InterviewPage() {
               addTranscript(role, msg.transcript);
               setLiveIndicator(role === "agent" ? "Your turn to speak..." : "AI is processing...");
               if (role === "user") setCandidateSpeaking(false);
+              const lower = (msg.transcript || "").toLowerCase();
+              if (role === "user" && (lower.includes("hang up") || lower.includes("end the call") || lower.includes("end call") || lower.includes("disconnect") || lower.includes("terminate the call"))) {
+                if (vapi) vapi.stop();
+                endCall();
+              }
             }
           }
         });
