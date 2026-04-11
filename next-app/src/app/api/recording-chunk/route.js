@@ -12,7 +12,7 @@ export function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders });
 }
 
-const AUTO_FINALIZE_MS = 45000; // auto-finish if no chunks arrive for 45s
+const AUTO_FINALIZE_MS = 90000; // auto-finish if no chunks arrive for 90s
 
 startRecordingConversionWorker();
 
@@ -41,9 +41,12 @@ export async function POST(request) {
   const statePath = path.join(recordingsDir, `${sessionToken}.state.json`);
   const loadState = () => {
     try { return JSON.parse(fs.readFileSync(statePath, "utf8")); }
-    catch { return { nextIndex: 0, lastChunkAt: 0, finalized: false, conversionAttempts: 0 }; }
+    catch { return { nextIndex: 0, lastChunkAt: 0, finalized: false, conversionAttempts: 0, merging: false }; }
   };
   const saveState = (state) => fs.writeFileSync(statePath, JSON.stringify(state));
+
+  const state = loadState();
+  if (typeof state.merging !== "boolean") state.merging = false;
 
   if (chunk && typeof chunk.arrayBuffer === "function") {
     const buffer = Buffer.from(await chunk.arrayBuffer());
@@ -53,26 +56,52 @@ export async function POST(request) {
     }
     try {
       fs.writeFileSync(path.join(partsDir, `chunk-${idx}.webm`), buffer);
+      state.lastChunkAt = Date.now();
+      saveState(state);
+      console.log("[Recording] chunk received", { sessionToken, index: idx, size: buffer.length });
     } catch (err) {
       console.error(`Failed to write chunk ${idx}:`, err.message);
       throw err;
     }
   }
 
-  const state = loadState();
+  const canMerge = !state.merging;
+  if (canMerge) {
+    state.merging = true;
+    saveState(state);
+  } else {
+    console.log("[Recording] merge skipped because another merge is active", { sessionToken });
+  }
+
   let appendedBytes = 0;
   let appendedChunks = 0;
-  while (true) {
-    const partPath = path.join(partsDir, `chunk-${state.nextIndex}.webm`);
-    if (!fs.existsSync(partPath)) break;
-    const buf = fs.readFileSync(partPath);
-    fs.appendFileSync(webmPath, buf);
-    fs.unlinkSync(partPath);
-    appendedBytes += buf.length;
-    appendedChunks += 1;
-    state.nextIndex += 1;
-    state.lastChunkAt = Date.now();
-    saveState(state);
+  if (canMerge) {
+    try {
+      const files = fs.readdirSync(partsDir)
+        .filter(f => f.startsWith("chunk-") && f.endsWith(".webm"))
+        .map(f => {
+          const match = f.match(/chunk-(\d+)\.webm/);
+          return match ? { name: f, index: parseInt(match[1], 10) } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.index - b.index);
+
+      for (const file of files) {
+        const partPath = path.join(partsDir, file.name);
+        if (!fs.existsSync(partPath)) continue;
+        const buf = fs.readFileSync(partPath);
+        console.log("[Recording] merging chunk", { sessionToken, index: file.index, size: buf.length });
+        fs.appendFileSync(webmPath, buf);
+        fs.unlinkSync(partPath);
+        appendedBytes += buf.length;
+        appendedChunks += 1;
+        state.nextIndex = Math.max(state.nextIndex, file.index + 1);
+      }
+      if (appendedChunks > 0 && !state.lastChunkAt) state.lastChunkAt = Date.now();
+    } finally {
+      state.merging = false;
+      saveState(state);
+    }
   }
 
   console.log("[recording-chunk] Recording append:", {
@@ -120,7 +149,7 @@ export async function POST(request) {
   if (finalizeNow) {
     state.finalized = true;
     saveState(state);
-    console.log("[recording] finalize triggered", { sessionToken, reason: isFinal ? "client-final" : "auto-timeout" });
+    console.log("[Recording] finalize triggered", { sessionToken, reason: isFinal ? "client-final" : "auto-timeout" });
     queueConversion(sessionToken);
   } else if (shouldAutoFinalize) {
     // We expected to auto-finalize but webm isn't present; mark as finalized to avoid loops.

@@ -76,6 +76,8 @@ export default function InterviewPage() {
       let headAwaySince = null;
       let gazeAwaySince = null;
       const lastProctoringWarnAt = { face: 0, head: 0, gaze: 0 };
+      window.__mediaRecorderRunning = window.__mediaRecorderRunning || false;
+      let finalized = false;
 
       function setStatus(msg) { if (statusText) statusText.textContent = msg; }
       function hideOverlay()  { if (statusOverlay) statusOverlay.style.display = "none"; }
@@ -86,14 +88,21 @@ export default function InterviewPage() {
 
       window.addEventListener("beforeunload", () => {
         const sessionToken = getParam("session") || "";
-        if (!sessionToken) return;
-        const payload = JSON.stringify({ session_token: sessionToken });
-        const url = `${API_BASE}/api/session-disconnect`;
-        if (navigator.sendBeacon) {
-          const blob = new Blob([payload], { type: "application/json" });
-          navigator.sendBeacon(url, blob);
-        } else {
-          fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+        if (sessionToken) {
+          const payload = JSON.stringify({ session_token: sessionToken });
+          const url = `${API_BASE}/api/session-disconnect`;
+          if (navigator.sendBeacon) {
+            const blob = new Blob([payload], { type: "application/json" });
+            navigator.sendBeacon(url, blob);
+          } else {
+            fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+          }
+        }
+        try {
+          flushFinalChunk();
+          sendFinalizeSignal();
+        } catch (e) {
+          console.error("final upload failed", e);
         }
       });
 
@@ -248,6 +257,47 @@ export default function InterviewPage() {
         return Math.sqrt(dx * dx + dy * dy) || 1;
       }
 
+      function flushFinalChunk() {
+        try {
+          if (!mediaRecorder) return;
+          if (mediaRecorder.state === "recording") {
+            mediaRecorder.requestData();
+            mediaRecorder.stop();
+          }
+        } catch (e) {
+          console.error("final flush failed", e);
+        }
+      }
+
+      function sendFinalizeSignal() {
+        if (finalized) return;
+        finalized = true;
+        try {
+          navigator.sendBeacon(`${API_BASE}/api/recording-chunk?final=1`);
+        } catch (e) {
+          console.error("finalize beacon failed", e);
+        }
+      }
+
+      async function uploadChunk(blob, index, retry = 3) {
+        const sessionToken = getParam("session") || localStorage.getItem("sessionToken") || "";
+        if (!sessionToken) return;
+        try { localStorage.setItem("sessionToken", sessionToken); } catch (_) {}
+        const fd = new FormData();
+        fd.append("chunk", blob, "chunk.webm");
+        fd.append("sessionToken", sessionToken);
+        fd.append("chunkIndex", String(index));
+        try {
+          await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd, keepalive: true });
+        } catch (e) {
+          if (retry > 0) {
+            await new Promise(r => setTimeout(r, 1000));
+            return uploadChunk(blob, index, retry - 1);
+          }
+          throw e;
+        }
+      }
+
       async function setupFaceProctoring() {
         if (!proctoringConfig.enableFacePresence && !proctoringConfig.enableHeadPose && !proctoringConfig.enableGaze) return;
         if (!candidateVideo) return;
@@ -371,7 +421,10 @@ export default function InterviewPage() {
       }
 
       async function startRecording() {
+        if (window.__mediaRecorderRunning) return;
         if (!localStream || !window.MediaRecorder) return;
+        window.__mediaRecorderRunning = true;
+        finalized = false;
         try {
           audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000, latencyHint: "interactive" });
           if (audioCtx.state === "suspended") await audioCtx.resume();
@@ -404,21 +457,19 @@ export default function InterviewPage() {
             const idxKey = `recChunk:${sessionToken}`;
             const nextIndex = Number(localStorage.getItem(idxKey) || "0");
             localStorage.setItem(idxKey, String(nextIndex + 1));
-            const fd = new FormData();
-            fd.append("chunk", e.data, "chunk.webm");
-            fd.append("sessionToken", sessionToken);
-            fd.append("chunkIndex", String(nextIndex));
-            fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd, keepalive: false })
+            uploadChunk(e.data, nextIndex)
               .catch(err => console.error("Chunk upload failed:", err.message));
           };
-          mediaRecorder.start(2000);
-        } catch (e) { console.error("Recording setup failed:", e.message); }
+          mediaRecorder.onstop = () => { window.__mediaRecorderRunning = false; };
+          mediaRecorder.start(5000);
+        } catch (e) { console.error("Recording setup failed:", e.message); window.__mediaRecorderRunning = false; }
       }
 
       async function stopAndUpload() {
         if (!mediaRecorder || mediaRecorder.state === "inactive") return;
         return new Promise(resolve => {
           mediaRecorder.onstop = async () => {
+            window.__mediaRecorderRunning = false;
             if (audioCtx) { audioCtx.close(); audioCtx = null; }
             const sessionToken = getParam("session") || localStorage.getItem("sessionToken") || "";
             if (sessionToken) {
@@ -426,12 +477,13 @@ export default function InterviewPage() {
               const fd = new FormData();
               fd.append("sessionToken", sessionToken);
               fd.append("final", "1");
-              await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd, keepalive: false })
+              await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd, keepalive: true })
                 .catch(err => console.error("Finalize upload failed:", err.message));
             }
+            sendFinalizeSignal();
             resolve();
           };
-          mediaRecorder.stop();
+          flushFinalChunk();
         });
       }
 
@@ -519,6 +571,10 @@ export default function InterviewPage() {
 
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "hidden") handleTabSwitch();
+        if (document.visibilityState === "hidden") {
+          flushFinalChunk();
+          sendFinalizeSignal();
+        }
       });
       window.addEventListener("blur", () => handleTabSwitch());
 

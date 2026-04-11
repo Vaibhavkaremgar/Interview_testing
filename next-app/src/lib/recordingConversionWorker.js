@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { spawn, spawnSync } from "child_process";
+import { spawn, spawnSync, execSync } from "child_process";
 import { pool, DB_READY } from "./db.js";
 
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || path.join(process.cwd(), "recordings");
@@ -16,6 +16,20 @@ let converting = false;
 let resolvedFFmpeg = null;
 let resolvedFFprobe = null;
 const pending = new Set();
+
+function getFFmpegPath() {
+  return process.env.FFMPEG_BIN || "ffmpeg";
+}
+
+function checkFFmpeg() {
+  try {
+    const version = execSync(`${getFFmpegPath()} -version`, { stdio: "pipe" }).toString();
+    const first = (version || "").split("\n")[0] || "";
+    console.log("✅ FFmpeg available", first);
+  } catch (err) {
+    console.error("❌ FFmpeg not found", err?.message || err);
+  }
+}
 
 function detectBinary(candidates = [], name = "binary") {
   for (const bin of candidates.filter(Boolean)) {
@@ -39,6 +53,16 @@ function ensureBinaries() {
       console.info("[recording] ffprobe detected:", resolvedFFprobe, (v?.stdout || "").split("\n")[0] || "");
     }
   }
+
+  if (!resolvedFFmpeg) {
+    resolvedFFmpeg = detectBinary([getFFmpegPath()], "ffmpeg");
+    if (!resolvedFFmpeg) {
+      console.warn("[recording] ffmpeg not available; mp4 conversion will be skipped. Set FFMPEG_BIN or install ffmpeg.");
+    } else {
+      const v = spawnSync(resolvedFFmpeg, ["-version"], { stdio: "pipe", encoding: "utf8" });
+      console.info("[recording] ffmpeg detected:", resolvedFFmpeg, (v?.stdout || "").split("\n")[0] || "");
+    }
+  }
 }
 
 function ensureDir() {
@@ -59,7 +83,7 @@ function sessionPaths(sessionToken) {
 
 function loadState(statePath) {
   try { return JSON.parse(fs.readFileSync(statePath, "utf8")); }
-  catch { return { nextIndex: 0, lastChunkAt: 0, finalized: false, conversionAttempts: 0 }; }
+  catch { return { nextIndex: 0, lastChunkAt: 0, finalized: false, conversionAttempts: 0, merging: false }; }
 }
 
 function saveState(statePath, state) {
@@ -67,7 +91,23 @@ function saveState(statePath, state) {
 }
 
 async function convertToMp4(inputPath, outputPath) {
-  throw new Error("FFmpeg conversion disabled");
+  const ffmpegPath = resolvedFFmpeg || getFFmpegPath();
+  if (!ffmpegPath) throw new Error("ffmpeg not available");
+  return new Promise((resolve, reject) => {
+    const ff = spawn(ffmpegPath, [
+      "-y",
+      "-i", inputPath,
+      "-c:v", "libx264",
+      "-c:a", "aac",
+      outputPath,
+    ], { stdio: "inherit" });
+
+    ff.on("error", (err) => reject(err));
+    ff.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+  });
 }
 
 async function getVideoDuration(filePath) {
@@ -90,6 +130,9 @@ async function getVideoDuration(filePath) {
 function mergeAvailableParts(sessionToken) {
   const { webm, parts, state: statePath } = sessionPaths(sessionToken);
   const state = loadState(statePath);
+  if (typeof state.merging !== "boolean") state.merging = false;
+  if (state.merging) return { merged: 0, state };
+
   let merged = 0;
 
   // If state got reset but parts exist, start from 0.
@@ -97,18 +140,37 @@ function mergeAvailableParts(sessionToken) {
     state.nextIndex = 0;
   }
 
-  while (true) {
-    const partPath = path.join(parts, `chunk-${state.nextIndex}.webm`);
-    if (!fs.existsSync(partPath)) break;
-    const buf = fs.readFileSync(partPath);
-    fs.appendFileSync(webm, buf);
-    fs.unlinkSync(partPath);
-    merged += 1;
-    state.nextIndex += 1;
-    state.lastChunkAt = state.lastChunkAt || Date.now();
+  state.merging = true;
+  saveState(statePath, state);
+
+  try {
+    const files = fs.existsSync(parts)
+      ? fs.readdirSync(parts)
+        .filter(f => f.startsWith("chunk-") && f.endsWith(".webm"))
+        .map(f => {
+          const match = f.match(/chunk-(\d+)\.webm/);
+          return match ? { name: f, index: parseInt(match[1], 10) } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.index - b.index)
+      : [];
+
+    for (const file of files) {
+      const partPath = path.join(parts, file.name);
+      if (!fs.existsSync(partPath)) continue;
+      const buf = fs.readFileSync(partPath);
+      console.log("[Recording] merging chunk", { sessionToken, index: file.index, size: buf.length, worker: true });
+      fs.appendFileSync(webm, buf);
+      fs.unlinkSync(partPath);
+      merged += 1;
+      state.nextIndex = Math.max(state.nextIndex, file.index + 1);
+    }
+  } finally {
+    state.merging = false;
+    if (merged > 0 && !state.lastChunkAt) state.lastChunkAt = Date.now();
+    saveState(statePath, state);
   }
 
-  if (merged > 0) saveState(statePath, state);
   return { merged, state };
 }
 
@@ -127,7 +189,7 @@ async function finalizeSession(sessionToken, reason = "idle") {
 
   state.finalized = true;
   saveState(paths.state, state);
-  console.log("[recording] finalize triggered", { sessionToken, reason, merged });
+  console.log("[Recording] finalize triggered", { sessionToken, reason, merged });
   queueConversion(sessionToken);
 }
 
@@ -142,6 +204,29 @@ async function convertSession(sessionToken) {
 
   const webmDuration = await getVideoDuration(paths.webm);
   const webmStats = fs.statSync(paths.webm);
+  let mp4Stats = null;
+  let mp4Duration = 0;
+  console.log("webm created:", paths.webm);
+
+  if (!fs.existsSync(paths.mp4) || fs.statSync(paths.mp4).mtimeMs < webmStats.mtimeMs) {
+    try {
+      console.log("converting to mp4", { sessionToken });
+      await convertToMp4(paths.webm, paths.mp4);
+      mp4Stats = fs.existsSync(paths.mp4) ? fs.statSync(paths.mp4) : null;
+      if (mp4Stats) mp4Duration = await getVideoDuration(paths.mp4);
+      if (mp4Stats) console.log("mp4 created:", paths.mp4);
+    } catch (e) {
+      console.error("[recording] mp4 conversion failed", { sessionToken, error: e.message });
+    }
+  } else {
+    mp4Stats = fs.statSync(paths.mp4);
+    mp4Duration = await getVideoDuration(paths.mp4);
+  }
+
+  const finalPath = mp4Stats ? path.basename(paths.mp4) : path.basename(paths.webm);
+  const finalSize = mp4Stats ? mp4Stats.size : webmStats.size;
+  const finalDuration = mp4Stats ? (mp4Duration || webmDuration) : webmDuration;
+  const finalFormat = mp4Stats ? "mp4" : "webm";
 
   if (DB_READY && pool) {
     try {
@@ -150,18 +235,25 @@ async function convertSession(sessionToken) {
            SET recording_path = $1,
                recording_size_bytes = $2,
                recording_duration_seconds = $3,
-               recording_format = 'webm',
+               recording_format = $4,
                recording_data = NULL,
                recording_created_at = COALESCE(recording_created_at, NOW())
-         WHERE session_token = $4`,
-        [path.basename(paths.webm), webmStats.size, webmDuration, sessionToken]
+         WHERE session_token = $5`,
+        [finalPath, finalSize, finalDuration, finalFormat, sessionToken]
       );
     } catch (e) {
       console.warn("[recording] DB update failed", { sessionToken, error: e.message });
     }
   }
 
-  console.log("[recording] webm finalized", { sessionToken, duration: webmDuration, size: webmStats.size });
+  console.log("[recording] webm finalized", {
+    sessionToken,
+    webmDuration,
+    webmSize: webmStats.size,
+    mp4Duration,
+    mp4Size: mp4Stats?.size || null,
+    format: finalFormat,
+  });
   cleanup(sessionToken);
 }
 
@@ -231,6 +323,7 @@ function queueConversion(sessionToken) {
 function startRecordingConversionWorker() {
   if (workerStarted) return;
   workerStarted = true;
+  checkFFmpeg();
   ensureBinaries();
   ensureDir();
   // Startup sweep
