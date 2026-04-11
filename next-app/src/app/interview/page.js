@@ -78,6 +78,8 @@ export default function InterviewPage() {
       const lastProctoringWarnAt = { face: 0, head: 0, gaze: 0 };
       window.__mediaRecorderRunning = window.__mediaRecorderRunning || false;
       let finalized = false;
+      const uploadQueue = [];
+      let uploading = false;
 
       function setStatus(msg) { if (statusText) statusText.textContent = msg; }
       function hideOverlay()  { if (statusOverlay) statusOverlay.style.display = "none"; }
@@ -287,15 +289,31 @@ export default function InterviewPage() {
         fd.append("chunk", blob, "chunk.webm");
         fd.append("sessionToken", sessionToken);
         fd.append("chunkIndex", String(index));
-        try {
-          await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd, keepalive: true });
-        } catch (e) {
-          if (retry > 0) {
-            await new Promise(r => setTimeout(r, 1000));
-            return uploadChunk(blob, index, retry - 1);
+        uploadQueue.push({ fd, retry });
+        processUploadQueue();
+      }
+
+      async function processUploadQueue() {
+        if (uploading) return;
+        uploading = true;
+        while (uploadQueue.length) {
+          const { fd, retry } = uploadQueue.shift();
+          let attempts = retry;
+          while (attempts >= 0) {
+            try {
+              await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd });
+              break;
+            } catch (e) {
+              if (attempts === 0) {
+                console.error("Chunk upload failed:", e?.message || e);
+                break;
+              }
+              await new Promise(r => setTimeout(r, 1000));
+              attempts -= 1;
+            }
           }
-          throw e;
         }
+        uploading = false;
       }
 
       async function setupFaceProctoring() {
