@@ -8,8 +8,8 @@ export default function InterviewPage() {
       const VapiSDK = mod.default || mod;
       const Vapi = VapiSDK.default || VapiSDK;
 
-      const PUBLIC_KEY   = "f3234324-c709-4c43-9574-59d48287a0e1";
-      const ASSISTANT_ID = "9e35651f-30ff-49a5-85b7-007e25513445";
+      const PUBLIC_KEY   = "515511f1-b187-4957-86c2-fcddc3ceca9f";
+      const ASSISTANT_ID = "88804242-9889-441f-a384-ed4ec7dcaa07";
       const API_BASE     = "";
 
       function getParam(key) {
@@ -411,7 +411,7 @@ export default function InterviewPage() {
             fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd, keepalive: false })
               .catch(err => console.error("Chunk upload failed:", err.message));
           };
-          mediaRecorder.start(1000);
+          mediaRecorder.start(2000);
         } catch (e) { console.error("Recording setup failed:", e.message); }
       }
 

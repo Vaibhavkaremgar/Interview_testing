@@ -30,15 +30,6 @@ function detectBinary(candidates = [], name = "binary") {
 }
 
 function ensureBinaries() {
-  if (!resolvedFFmpeg) {
-    resolvedFFmpeg = detectBinary([FFMPEG_ENV, "ffmpeg"], "ffmpeg");
-    if (!resolvedFFmpeg) {
-      console.error("[recording] FFmpeg not available. Set FFMPEG_BIN or install system ffmpeg.");
-    } else {
-      const v = spawnSync(resolvedFFmpeg, ["-version"], { stdio: "pipe", encoding: "utf8" });
-      console.info("[recording] FFmpeg detected:", resolvedFFmpeg, (v?.stdout || "").split("\n")[0] || "");
-    }
-  }
   if (!resolvedFFprobe) {
     resolvedFFprobe = detectBinary([FFPROBE_ENV, "ffprobe"], "ffprobe");
     if (!resolvedFFprobe) {
@@ -76,22 +67,7 @@ function saveState(statePath, state) {
 }
 
 async function convertToMp4(inputPath, outputPath) {
-  if (!resolvedFFmpeg) throw new Error("FFmpeg unavailable");
-  return new Promise((resolve, reject) => {
-    const ffmpeg = spawn(resolvedFFmpeg, [
-      "-i", inputPath,
-      "-c:v", "libx264",
-      "-preset", "fast",
-      "-crf", "23",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-movflags", "+faststart",
-      "-y",
-      outputPath,
-    ]);
-    ffmpeg.on("close", (code) => code === 0 ? resolve() : reject(new Error(`FFmpeg exited with code ${code}`)));
-    ffmpeg.on("error", reject);
-  });
+  throw new Error("FFmpeg conversion disabled");
 }
 
 async function getVideoDuration(filePath) {
@@ -159,76 +135,40 @@ async function convertSession(sessionToken) {
   const paths = sessionPaths(sessionToken);
   const state = loadState(paths.state);
 
-  // Skip if mp4 already exists
-  if (fs.existsSync(paths.mp4)) {
-    cleanup(sessionToken);
-    return;
-  }
-
-  // Ensure webm exists; try merge pending parts before converting.
+  // Ensure webm exists; try merge pending parts before "finalizing".
   mergeAvailableParts(sessionToken);
 
   if (!fs.existsSync(paths.webm)) return;
 
-  if (state.conversionAttempts >= MAX_CONVERT_RETRIES) {
-    console.warn("[recording] Max conversion retries reached", { sessionToken });
-    return;
-  }
+  const webmDuration = await getVideoDuration(paths.webm);
+  const webmStats = fs.statSync(paths.webm);
 
-  state.conversionAttempts = (state.conversionAttempts || 0) + 1;
-  saveState(paths.state, state);
-  console.log("[recording] conversion retry", { sessionToken, attempt: state.conversionAttempts });
-
-  try {
-    const webmDuration = await getVideoDuration(paths.webm);
-    await convertToMp4(paths.webm, paths.mp4);
-    if (!fs.existsSync(paths.mp4)) throw new Error("mp4 missing after ffmpeg");
-
-    const mp4Duration = await getVideoDuration(paths.mp4);
-    const mp4Stats = fs.statSync(paths.mp4);
-    const webmStats = fs.statSync(paths.webm);
-
-    const durationsClose = webmDuration === 0 || mp4Duration === 0
-      ? true
-      : Math.abs(mp4Duration - webmDuration) <= 2;
-
-    const useMp4 = durationsClose && mp4Duration >= Math.max(webmDuration - 2, 0);
-    const chosenPath = useMp4 ? paths.mp4 : paths.webm;
-    const chosenFormat = useMp4 ? "mp4" : "webm";
-    const chosenStats = useMp4 ? mp4Stats : webmStats;
-    const chosenDuration = useMp4 ? mp4Duration : webmDuration;
-
-    if (!useMp4) {
-      console.warn("[recording] mp4 shorter than webm; keeping webm", { sessionToken, mp4Duration, webmDuration });
-    }
-
-    if (DB_READY && pool) {
+  if (DB_READY && pool) {
+    try {
       await pool.query(
         `UPDATE interview_sessions
            SET recording_path = $1,
                recording_size_bytes = $2,
                recording_duration_seconds = $3,
-               recording_format = $4,
+               recording_format = 'webm',
                recording_data = NULL,
                recording_created_at = COALESCE(recording_created_at, NOW())
-         WHERE session_token = $5`,
-        [path.basename(chosenPath), chosenStats.size, chosenDuration, chosenFormat, sessionToken]
+         WHERE session_token = $4`,
+        [path.basename(paths.webm), webmStats.size, webmDuration, sessionToken]
       );
+    } catch (e) {
+      console.warn("[recording] DB update failed", { sessionToken, error: e.message });
     }
-
-    console.log("[recording] conversion success", { sessionToken, chosenFormat, duration: chosenDuration, size: chosenStats.size });
-    cleanup(sessionToken);
-  } catch (err) {
-    console.warn("[recording] conversion failed", { sessionToken, error: err.message });
-    // Leave webm for retry; state already incremented.
   }
+
+  console.log("[recording] webm finalized", { sessionToken, duration: webmDuration, size: webmStats.size });
+  cleanup(sessionToken);
 }
 
 function cleanup(sessionToken) {
   const paths = sessionPaths(sessionToken);
   if (fs.existsSync(paths.parts)) fs.rmSync(paths.parts, { recursive: true, force: true });
   if (fs.existsSync(paths.state)) fs.unlinkSync(paths.state);
-  if (fs.existsSync(paths.webm)) fs.unlinkSync(paths.webm);
 }
 
 function gatherSessionTokens() {
