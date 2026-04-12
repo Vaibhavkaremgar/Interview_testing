@@ -79,15 +79,18 @@ function parseRange(rangeHeader, fileSize) {
   return { start, end };
 }
 
-export async function GET(request, context) {
-
+async function handleRequest(request, context, { isHead = false } = {}) {
   const params = await context.params;
   const sessionToken = params?.sessionToken || "";
 
+  const rangeHeader = request.headers.get("range");
+
   console.log("========== RECORDING DEBUG START ==========");
+  console.log("method:", request.method);
   console.log("params:", params);
   console.log("sessionToken:", sessionToken);
   console.log("request.url:", request.url);
+  console.log("range header:", rangeHeader);
   console.log("===========================================");
 
   const authResult = validateAuth(request);
@@ -148,19 +151,21 @@ export async function GET(request, context) {
 
     // DB binary recording
     if (recording_data) {
-      console.log("[recording] streaming from DB");
+      console.log("[recording] streaming from DB (no range support)");
 
       const headers = new Headers();
       headers.set(
         "Content-Type",
         recording_format === "mp4" ? "video/mp4" : "video/webm"
       );
-      headers.set("Accept-Ranges", "bytes");
       headers.set("Content-Length", recording_data.length.toString());
-
+      // Do NOT advertise ranges since we don't slice blobs
       applyCors(headers);
 
-      return new Response(recording_data, { headers });
+      const status = 200;
+      console.log("[recording] response headers:", Object.fromEntries(headers));
+      if (isHead) return new Response(null, { status, headers });
+      return new Response(recording_data, { status, headers });
     }
 
     const recordingsDir =
@@ -220,8 +225,6 @@ export async function GET(request, context) {
     const stat = fs.statSync(fullPath);
     const fileSize = stat.size;
 
-    const rangeHeader = request.headers.get("range");
-
     const headers = new Headers();
     headers.set(
       "Content-Type",
@@ -229,6 +232,9 @@ export async function GET(request, context) {
     );
     headers.set("Accept-Ranges", "bytes");
     headers.set("Content-Length", fileSize.toString());
+    if (recording_duration_seconds) {
+      headers.set("X-Duration-Seconds", recording_duration_seconds.toString());
+    }
 
     applyCors(headers);
 
@@ -237,10 +243,31 @@ export async function GET(request, context) {
 
       if (range) {
         const { start, end } = range;
+        const chunkSize = end - start + 1;
 
         headers.set("Content-Range", `bytes ${start}-${end}/${fileSize}`);
+        headers.set("Content-Length", chunkSize.toString());
+
+        console.log("[recording] range request", {
+          file: fullPath,
+          size: fileSize,
+          start,
+          end,
+          chunkSize,
+        });
+        console.log("[recording] response headers:", Object.fromEntries(headers));
+
+        if (isHead) {
+          return new Response(null, { status: 206, headers });
+        }
 
         const stream = fs.createReadStream(fullPath, { start, end });
+        stream.on("open", () => console.log("[recording] stream start", { start, end }));
+        stream.on("end", () => console.log("[recording] stream end"));
+        stream.on("close", () => console.log("[recording] stream close"));
+        stream.on("error", (err) =>
+          console.error("[recording] stream error", err?.message || err)
+        );
 
         return new Response(stream, {
           status: 206,
@@ -249,11 +276,27 @@ export async function GET(request, context) {
       }
     }
 
-    headers.set("Content-Range", `bytes 0-${fileSize - 1}/${fileSize}`);
+    // No valid range header: full response
+    console.log("[recording] full file response", {
+      file: fullPath,
+      size: fileSize,
+    });
+    // Do NOT set Content-Range for 200 responses
+    console.log("[recording] response headers:", Object.fromEntries(headers));
+
+    if (isHead) {
+      return new Response(null, { status: 200, headers });
+    }
 
     const stream = fs.createReadStream(fullPath);
+    stream.on("open", () => console.log("[recording] stream start full"));
+    stream.on("end", () => console.log("[recording] stream end full"));
+    stream.on("close", () => console.log("[recording] stream close full"));
+    stream.on("error", (err) =>
+      console.error("[recording] stream error full", err?.message || err)
+    );
 
-    return new Response(stream, { headers });
+    return new Response(stream, { status: 200, headers });
 
   } catch (e) {
     console.error("Error serving recording:", e);
@@ -263,6 +306,10 @@ export async function GET(request, context) {
   }
 }
 
+export async function GET(request, context) {
+  return handleRequest(request, context, { isHead: false });
+}
+
 export async function HEAD(request, context) {
-  return GET(request, context);
+  return handleRequest(request, context, { isHead: true });
 }
