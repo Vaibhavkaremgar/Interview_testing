@@ -44,6 +44,8 @@ export default function InterviewPage() {
           consentBtn.disabled = true;
           consentBtn.textContent = "Invalid link";
         }
+        const consentScreen = document.getElementById("consentScreen");
+        if (consentScreen) consentScreen.style.display = "none";
         return;
       }
 
@@ -87,6 +89,8 @@ export default function InterviewPage() {
       let faceMissingSince = null;
       let headAwaySince = null;
       let gazeAwaySince = null;
+      let awaitingClosingAck = false;
+      let gracefulExitScheduled = false;
       const lastProctoringWarnAt = { face: 0, head: 0, gaze: 0 };
       window.__mediaRecorderRunning = window.__mediaRecorderRunning || false;
       let finalized = false;
@@ -185,6 +189,33 @@ export default function InterviewPage() {
 
       function addTranscript(role, text) {
         if (!text.trim()) return;
+        const lower = text.toLowerCase();
+        // Detect agent closing statements to expect a short user acknowledgement next.
+        if (role === "agent" && (
+          lower.includes("recruiter will get in touch") ||
+          lower.includes("we will get in touch") ||
+          lower.includes("we'll get in touch") ||
+          lower.includes("thanks for your time") ||
+          lower.includes("this concludes the interview") ||
+          lower.includes("that's all from my side")
+        )) {
+          awaitingClosingAck = true;
+        }
+        // If user responds with gratitude while we're awaiting closure, end gracefully.
+        if (role === "user" && awaitingClosingAck && !gracefulExitScheduled && (
+          lower.includes("thank you") ||
+          lower.includes("thanks") ||
+          lower.includes("bye") ||
+          lower.includes("goodbye")
+        )) {
+          gracefulExitScheduled = true;
+          if (vapi) {
+            vapi.send({ type: "add-message", message: { role: "system", content: "Thank you for your time. We are ending the call now." } });
+            setTimeout(() => { try { vapi.stop(); } catch (_) {} endCall(); }, 600);
+          } else {
+            endCall();
+          }
+        }
         if (role === lastRole && lastEntry) {
           lastEntry.querySelector(".text").textContent += " " + text.trim();
         } else {
@@ -360,6 +391,8 @@ export default function InterviewPage() {
         faceMissingSince = null;
         headAwaySince = null;
         gazeAwaySince = null;
+        awaitingClosingAck = false;
+        gracefulExitScheduled = false;
       }
 
       function startFaceProctoring() {
