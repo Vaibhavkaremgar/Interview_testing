@@ -375,7 +375,7 @@
 
 <script>
 const p = new URLSearchParams(window.location.search);
-const token = p.get("token");
+const token = p.get("token") || p.get("session") || p.get("sessionToken");
 const cfg = {
   name:          p.get("candidateName") || p.get("name")         || "",
   email:         p.get("email")                                   || "",
@@ -632,7 +632,17 @@ function showStatus(msg, type) {
   el.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-init();
+if (!token) {
+  document.body.innerHTML = `
+    <div style="max-width:720px;margin:64px auto;padding:32px;border-radius:16px;
+                background:#fff;box-shadow:0 6px 30px rgba(0,0,0,0.12);font-family:Arial,sans-serif;">
+      <h1 style="margin-bottom:12px;font-size:22px;color:#1a73e8;">Invalid or missing booking link</h1>
+      <p style="margin-bottom:12px;color:#4a5568;">This page requires a valid session token. Please open the booking link sent to your email.</p>
+      <p style="color:#6b7280;">If you believe this is an error, request a fresh booking link from your recruiter.</p>
+    </div>`;
+} else {
+  init();
+}
 </script>
 </body>
 </html>

@@ -35,6 +35,18 @@ export default function InterviewPage() {
       const camBtn          = document.getElementById("camBtn");
       const endBtn          = document.getElementById("endBtn");
 
+      // Hard stop: a session token is required to enter the interview.
+      const sessionTokenParam = getParam("session");
+      if (!sessionTokenParam) {
+        showExpired("Missing session token. Please open the interview from your unique link.");
+        const consentBtn = document.getElementById("consentBtn");
+        if (consentBtn) {
+          consentBtn.disabled = true;
+          consentBtn.textContent = "Invalid link";
+        }
+        return;
+      }
+
       let localStream        = null;
       let isMuted            = false;
       let isCamOff           = false;
