@@ -1,11 +1,14 @@
 import { pool, DB_READY } from "./db.js";
+import { validateInterviewSessionToken } from "./sessionAuth.js";
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 const sessionsByToken = new Map();
 const callToToken = new Map();
+const validatedTokens = new Map();
 const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS || 45000);
+const VALID_TOKEN_CACHE_MS = 120000;
 
 function normalizeRole(role) {
   return (role || "").toString().trim().toLowerCase();
@@ -17,7 +20,8 @@ function isTranscriptRoleAllowed(role) {
 }
 
 function getSessionByToken(token) {
-  const t = token || "default";
+  const t = (token || "").toString().trim();
+  if (!t) return null;
   if (!sessionsByToken.has(t)) {
     sessionsByToken.set(t, {
       resumeText: "",
@@ -29,7 +33,7 @@ function getSessionByToken(token) {
       userId: "",
       candidateId: "",
       jobId: "",
-      asyncToken: token || "",
+      asyncToken: t,
       transcript: [],
       metadataLoaded: false,
       lastTranscriptAt: 0,
@@ -71,14 +75,54 @@ function attachCallToToken(callId, token) {
   callToToken.set(callId, token);
 }
 
-function resolveToken(body, callId) {
+function extractExplicitToken(body) {
   const v =
     body?.message?.call?.assistantOverrides?.variableValues ||
     body?.message?.call?.metadata ||
     body?.call?.metadata ||
     {};
-  const token = v.session || v.sessionToken || v.asyncToken || body?.sessionToken || "";
-  return token || callId || "default";
+  return (v.session || v.sessionToken || v.asyncToken || body?.sessionToken || "").toString().trim();
+}
+
+async function validateTokenCached(token, allowEnded = true) {
+  const t = (token || "").toString().trim();
+  if (!t) return false;
+  const cacheUntil = validatedTokens.get(t);
+  if (cacheUntil && cacheUntil > Date.now()) return true;
+  const validation = await validateInterviewSessionToken(t, { allowEnded });
+  if (!validation.ok) return false;
+  validatedTokens.set(t, Date.now() + VALID_TOKEN_CACHE_MS);
+  return true;
+}
+
+async function lookupTokenByCallId(callId) {
+  if (!callId || !DB_READY || !pool) return "";
+  try {
+    const { rows } = await pool.query(
+      `SELECT session_token
+         FROM interview_sessions
+        WHERE vapi_call_id = $1
+        LIMIT 1`,
+      [callId]
+    );
+    return rows[0]?.session_token || "";
+  } catch (e) {
+    console.warn("Could not resolve session by call id:", e.message);
+    return "";
+  }
+}
+
+async function resolveToken(body, callId) {
+  const explicitToken = extractExplicitToken(body);
+  if (explicitToken && await validateTokenCached(explicitToken)) return explicitToken;
+
+  const mappedToken = callId ? callToToken.get(callId) || "" : "";
+  if (mappedToken && await validateTokenCached(mappedToken)) return mappedToken;
+
+  const dbToken = await lookupTokenByCallId(callId);
+  if (dbToken && await validateTokenCached(dbToken)) return dbToken;
+
+  return "";
 }
 
 function extractCandidateData(body) {
@@ -327,11 +371,16 @@ function pushTranscript(session, roleRaw, text) {
 async function processWebhook(body) {
   try {
     const messageType = body?.message?.type || body?.type;
-    const callId = body?.message?.call?.id || body?.call?.id || "default";
-    const token = resolveToken(body, callId);
-    attachCallToToken(callId, token);
+    const callId = body?.message?.call?.id || body?.call?.id || "";
+    const token = await resolveToken(body, callId);
+    if (!token) {
+      console.warn("Ignoring webhook event without a valid session token", { messageType, callId });
+      return;
+    }
+    if (callId) attachCallToToken(callId, token);
     const session = getSessionByToken(token);
-    session.asyncToken = session.asyncToken || (token !== "default" ? token : "");
+    if (!session) return;
+    session.asyncToken = session.asyncToken || token;
 
     if (!session.metadataLoaded) {
       const data = extractCandidateData(body);
@@ -382,8 +431,11 @@ async function processWebhook(body) {
         session.asyncToken ||
         "";
       if (asyncToken) {
-        session.asyncToken = asyncToken;
-        attachCallToToken(callId, asyncToken);
+        const asyncTokenValid = await validateTokenCached(asyncToken);
+        if (asyncTokenValid) {
+          session.asyncToken = asyncToken;
+          if (callId) attachCallToToken(callId, asyncToken);
+        }
       }
 
       if (asyncToken && DB_READY && pool) {

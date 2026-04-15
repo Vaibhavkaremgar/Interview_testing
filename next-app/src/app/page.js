@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main style={{ fontFamily: "Segoe UI, Arial, sans-serif", padding: "48px" }}>
@@ -6,8 +8,8 @@ export default function Home() {
         Unified frontend and backend stack.
       </p>
       <ul style={{ marginTop: "24px", paddingLeft: "18px" }}>
-        <li><a href="/booking">Booking</a></li>
-        <li><a href="/interview">Interview</a></li>
+        <li><Link href="/booking">Booking</Link></li>
+        <li><Link href="/interview">Interview</Link></li>
       </ul>
     </main>
   );

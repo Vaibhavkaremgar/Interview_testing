@@ -5,6 +5,7 @@ import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
 import { startRecordingRetryLoop } from "@/lib/recordingRetry.js";
 import { startRecordingConversionWorker, queueConversion, finalizeSession } from "@/lib/recordingConversionWorker.js";
+import { validateInterviewSessionToken } from "@/lib/sessionAuth.js";
 
 export const runtime = "nodejs";
 
@@ -31,13 +32,13 @@ export async function POST(request) {
   const chunkIndexRaw = (formData?.get("chunkIndex") || "").toString();
   const isFinal = (formData?.get("final") || searchParams.get("final") || "").toString() === "1";
 
-  if (isFinal && sessionToken) {
+  const validation = await validateInterviewSessionToken(sessionToken, { allowEnded: true });
+  if (!validation.ok) {
+    return withCors(NextResponse.json({ success: false, message: validation.error }, { status: validation.status }));
+  }
+  if (isFinal) {
     await finalizeSession(sessionToken, "client-final");
     return withCors(NextResponse.json({ success: true, final: true }));
-  }
-
-  if (!sessionToken) {
-    return withCors(NextResponse.json({ success: false, message: "Invalid session" }, { status: 400 }));
   }
 
   startRecordingRetryLoop();
