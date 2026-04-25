@@ -4,7 +4,6 @@ import { spawn, spawnSync, execSync } from "child_process";
 import { pool, DB_READY } from "./db.js";
 
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || path.join(process.cwd(), "recordings");
-const FINALIZE_INACTIVE_MS = 30000;
 const FINALIZE_SWEEP_MS = 60000;
 const CONVERT_SWEEP_MS = 30000;
 const MAX_CONVERT_RETRIES = 10;
@@ -120,7 +119,12 @@ async function getVideoDuration(filePath) {
     ffprobe.stdout.on("data", (data) => { output += data.toString(); });
     ffprobe.on("close", (code) => {
       if (code === 0) {
-        try { resolve(Math.round(parseFloat(JSON.parse(output).format.duration))); } catch { resolve(0); }
+        try {
+          const raw = parseFloat(JSON.parse(output)?.format?.duration);
+          resolve(Number.isFinite(raw) ? Math.round(raw) : 0);
+        } catch {
+          resolve(0);
+        }
       } else {
         resolve(0);
       }
@@ -179,12 +183,9 @@ function mergeAvailableParts(sessionToken) {
 async function finalizeSession(sessionToken, reason = "idle") {
   const paths = sessionPaths(sessionToken);
   const state = loadState(paths.state);
-  const now = Date.now();
-  const last = state.lastChunkAt || 0;
 
   if (state.finalized) return;
-  const inactive = !last || now - last > FINALIZE_INACTIVE_MS;
-  if (!inactive && (reason === "idle" || reason === "sweep")) return;
+  if (reason !== "client-final") return;
 
   const { merged } = mergeAvailableParts(sessionToken);
   if (!fs.existsSync(paths.webm) && merged === 0) return;
@@ -202,6 +203,8 @@ async function convertSession(sessionToken) {
   try {
     const paths = sessionPaths(sessionToken);
     const state = loadState(paths.state);
+
+    if (!state.finalized) return;
 
     // Ensure webm exists; try merge pending parts before "finalizing".
     mergeAvailableParts(sessionToken);
@@ -229,9 +232,12 @@ async function convertSession(sessionToken) {
       mp4Duration = await getVideoDuration(paths.mp4);
     }
 
+    const safeDuration = (value) => Number.isFinite(value) && value >= 0 ? Math.round(value) : 0;
     const finalPath = mp4Stats ? path.basename(paths.mp4) : path.basename(paths.webm);
     const finalSize = mp4Stats ? mp4Stats.size : webmStats.size;
-    const finalDuration = mp4Stats ? (mp4Duration || webmDuration) : webmDuration;
+    const finalDuration = mp4Stats
+      ? (safeDuration(mp4Duration) || safeDuration(webmDuration))
+      : safeDuration(webmDuration);
     const finalFormat = mp4Stats ? "mp4" : "webm";
 
     if (DB_READY && pool) {
@@ -301,6 +307,8 @@ async function convertSweep() {
   const tokens = gatherSessionTokens();
   for (const token of tokens) {
     const paths = sessionPaths(token);
+    const state = loadState(paths.state);
+    if (!state.finalized) continue;
     if (
       fs.existsSync(paths.mp4) &&
       !fs.existsSync(paths.webm) &&

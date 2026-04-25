@@ -4,7 +4,7 @@ import path from "path";
 import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
 import { startRecordingRetryLoop } from "@/lib/recordingRetry.js";
-import { startRecordingConversionWorker, queueConversion, finalizeSession } from "@/lib/recordingConversionWorker.js";
+import { startRecordingConversionWorker, finalizeSession } from "@/lib/recordingConversionWorker.js";
 import { validateInterviewSessionToken } from "@/lib/sessionAuth.js";
 
 export const runtime = "nodejs";
@@ -12,8 +12,6 @@ export const runtime = "nodejs";
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders });
 }
-
-const AUTO_FINALIZE_MS = 90000; // auto-finish if no chunks arrive for 90s
 
 startRecordingConversionWorker();
 
@@ -36,10 +34,6 @@ export async function POST(request) {
   if (!validation.ok) {
     return withCors(NextResponse.json({ success: false, message: validation.error }, { status: validation.status }));
   }
-  if (isFinal) {
-    await finalizeSession(sessionToken, "client-final");
-    return withCors(NextResponse.json({ success: true, final: true }));
-  }
 
   startRecordingRetryLoop();
 
@@ -61,6 +55,16 @@ export async function POST(request) {
 
   const state = loadState();
   if (typeof state.merging !== "boolean") state.merging = false;
+  if (typeof state.finalizing !== "boolean") state.finalizing = false;
+
+  if ((state.finalizing || state.finalized) && !isFinal) {
+    return withCors(NextResponse.json({ success: false, message: "Recording has been finalized", finalized: true }, { status: 409 }));
+  }
+
+  if (isFinal) {
+    state.finalizing = true;
+    saveState(state);
+  }
 
   if (chunk && typeof chunk.arrayBuffer === "function") {
     const buffer = Buffer.from(await chunk.arrayBuffer());
@@ -77,7 +81,7 @@ export async function POST(request) {
       console.error(`Failed to write chunk ${idx}:`, err.message);
       throw err;
     }
-  } else {
+  } else if (!isFinal) {
     return withCors(NextResponse.json({ success: true, appendedChunks: 0, appendedBytes: 0, nextIndex: state.nextIndex, final: isFinal }));
   }
 
@@ -151,28 +155,13 @@ export async function POST(request) {
     }
   }
 
-  let converted = false;
-  let finalFormat = null;
-
-  const shouldAutoFinalize = !isFinal
-    && state.lastChunkAt
-    && Date.now() - state.lastChunkAt > AUTO_FINALIZE_MS
-    && !state.finalized
-    && fs.existsSync(webmPath);
-
-  const finalizeNow = (isFinal || shouldAutoFinalize) && fs.existsSync(webmPath);
-
-  if (finalizeNow) {
-    state.finalized = true;
-    saveState(state);
-    console.log("[Recording] finalize triggered", { sessionToken, reason: isFinal ? "client-final" : "auto-timeout" });
-    queueConversion(sessionToken);
-  } else if (shouldAutoFinalize) {
-    // We expected to auto-finalize but webm isn't present; mark as finalized to avoid loops.
-    state.finalized = true;
-    saveState(state);
-  } else if (isFinal) {
-    console.warn("isFinal=true but webm file does not exist at:", webmPath);
+  if (isFinal) {
+    if (fs.existsSync(webmPath)) {
+      console.log("[Recording] finalize triggered", { sessionToken, reason: "client-final" });
+      await finalizeSession(sessionToken, "client-final");
+    } else {
+      console.warn("isFinal=true but webm file does not exist at:", webmPath);
+    }
   }
 
   console.log("[recording-chunk] Append result", {
@@ -182,9 +171,6 @@ export async function POST(request) {
     hasWebm: fs.existsSync(webmPath),
     hasMp4: fs.existsSync(path.join(recordingsDir, `${sessionToken}.mp4`)),
     isFinal,
-    shouldAutoFinalize,
-    converted,
-    format: finalFormat,
   });
 
   return withCors(NextResponse.json({
@@ -193,7 +179,5 @@ export async function POST(request) {
     appendedBytes,
     nextIndex: state.nextIndex,
     final: isFinal,
-    converted,
-    format: finalFormat,
   }));
 }

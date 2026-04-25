@@ -96,6 +96,7 @@ export default function InterviewPage() {
       let finalized = false;
       const uploadQueue = [];
       let uploading = false;
+      let inFlightUploads = 0;
 
       function setStatus(msg) { if (statusText) statusText.textContent = msg; }
       function hideOverlay()  { if (statusOverlay) statusOverlay.style.display = "none"; }
@@ -117,8 +118,7 @@ export default function InterviewPage() {
           }
         }
         try {
-          flushFinalChunk();
-          sendFinalizeSignal();
+          void stopAndUpload();
         } catch (e) {
           console.error("final upload failed", e);
         }
@@ -314,14 +314,27 @@ export default function InterviewPage() {
         }
       }
 
+      function waitForUploadQueueToDrain(timeoutMs = 30000) {
+        const start = Date.now();
+        return new Promise(resolve => {
+          const check = () => {
+            if (!uploading && uploadQueue.length === 0 && inFlightUploads === 0) {
+              resolve();
+              return;
+            }
+            if (Date.now() - start >= timeoutMs) {
+              resolve();
+              return;
+            }
+            setTimeout(check, 100);
+          };
+          check();
+        });
+      }
+
       function sendFinalizeSignal() {
         if (finalized) return;
         finalized = true;
-        try {
-          navigator.sendBeacon(`${API_BASE}/api/recording-chunk?final=1`);
-        } catch (e) {
-          console.error("finalize beacon failed", e);
-        }
       }
 
       async function uploadChunk(blob, index, retry = 3) {
@@ -336,27 +349,48 @@ export default function InterviewPage() {
         processUploadQueue();
       }
 
+      async function sendFinalRecordingMarker() {
+        const sessionToken = getParam("session") || localStorage.getItem("sessionToken") || "";
+        if (sessionToken) {
+          try { localStorage.setItem("sessionToken", sessionToken); } catch (_) {}
+          const fd = new FormData();
+          fd.append("sessionToken", sessionToken);
+          fd.append("final", "1");
+          await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd, keepalive: true })
+            .catch(err => console.error("Finalize upload failed:", err.message));
+        }
+        sendFinalizeSignal();
+      }
+
       async function processUploadQueue() {
         if (uploading) return;
         uploading = true;
-        while (uploadQueue.length) {
-          const { fd, retry } = uploadQueue.shift();
-          let attempts = retry;
-          while (attempts >= 0) {
+        try {
+          while (uploadQueue.length) {
+            const { fd, retry } = uploadQueue.shift();
+            let attempts = retry;
+            inFlightUploads += 1;
             try {
-              await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd });
-              break;
-            } catch (e) {
-              if (attempts === 0) {
-                console.error("Chunk upload failed:", e?.message || e);
-                break;
+              while (attempts >= 0) {
+                try {
+                  await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd });
+                  break;
+                } catch (e) {
+                  if (attempts === 0) {
+                    console.error("Chunk upload failed:", e?.message || e);
+                    break;
+                  }
+                  await new Promise(r => setTimeout(r, 1000));
+                  attempts -= 1;
+                }
               }
-              await new Promise(r => setTimeout(r, 1000));
-              attempts -= 1;
+            } finally {
+              inFlightUploads -= 1;
             }
           }
+        } finally {
+          uploading = false;
         }
-        uploading = false;
       }
 
       async function setupFaceProctoring() {
@@ -529,21 +563,17 @@ export default function InterviewPage() {
       }
 
       async function stopAndUpload() {
-        if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+        if (!mediaRecorder || mediaRecorder.state === "inactive") {
+          await waitForUploadQueueToDrain();
+          await sendFinalRecordingMarker();
+          return;
+        }
         return new Promise(resolve => {
           mediaRecorder.onstop = async () => {
             window.__mediaRecorderRunning = false;
             if (audioCtx) { audioCtx.close(); audioCtx = null; }
-            const sessionToken = getParam("session") || localStorage.getItem("sessionToken") || "";
-            if (sessionToken) {
-              try { localStorage.setItem("sessionToken", sessionToken); } catch (_) {}
-              const fd = new FormData();
-              fd.append("sessionToken", sessionToken);
-              fd.append("final", "1");
-              await fetch(`${API_BASE}/api/recording-chunk`, { method: "POST", body: fd, keepalive: true })
-                .catch(err => console.error("Finalize upload failed:", err.message));
-            }
-            sendFinalizeSignal();
+            await waitForUploadQueueToDrain();
+            await sendFinalRecordingMarker();
             resolve();
           };
           flushFinalChunk();
@@ -635,8 +665,7 @@ export default function InterviewPage() {
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "hidden") handleTabSwitch();
         if (document.visibilityState === "hidden") {
-          flushFinalChunk();
-          sendFinalizeSignal();
+          void stopAndUpload().catch(err => console.error("hidden stop failed", err?.message || err));
         }
       });
       window.addEventListener("blur", () => handleTabSwitch());
