@@ -117,11 +117,6 @@ export default function InterviewPage() {
             fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
           }
         }
-        try {
-          void stopAndUpload();
-        } catch (e) {
-          console.error("final upload failed", e);
-        }
       });
 
       async function fetchSessionMetadata(sessionToken) {
@@ -664,9 +659,6 @@ export default function InterviewPage() {
 
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "hidden") handleTabSwitch();
-        if (document.visibilityState === "hidden") {
-          void stopAndUpload().catch(err => console.error("hidden stop failed", err?.message || err));
-        }
       });
       window.addEventListener("blur", () => handleTabSwitch());
 

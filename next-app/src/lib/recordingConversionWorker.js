@@ -193,7 +193,7 @@ async function finalizeSession(sessionToken, reason = "idle") {
   state.finalized = true;
   saveState(paths.state, state);
   console.log("[Recording] finalize triggered", { sessionToken, reason, merged });
-  queueConversion(sessionToken);
+  await convertSession(sessionToken);
 }
 
 async function convertSession(sessionToken) {

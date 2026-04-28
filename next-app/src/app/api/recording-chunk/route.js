@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { pool, DB_READY } from "@/lib/db.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
 import { startRecordingRetryLoop } from "@/lib/recordingRetry.js";
 import { startRecordingConversionWorker, finalizeSession } from "@/lib/recordingConversionWorker.js";
@@ -130,30 +129,6 @@ export async function POST(request) {
     appendedBytes,
     fileExists: fs.existsSync(webmPath),
   });
-
-  // Persist recording_path as soon as we have a merged file, so a missed final request won't leave DB null.
-  if (DB_READY && pool && fs.existsSync(webmPath) && appendedChunks > 0) {
-    try {
-      const stats = fs.statSync(webmPath);
-      console.log("[recording-chunk] DB update triggered");
-      await pool.query(
-        `UPDATE interview_sessions
-           SET recording_path = $1,
-               recording_size_bytes = COALESCE(recording_size_bytes, $2),
-               recording_format = COALESCE(recording_format, 'webm'),
-               recording_created_at = COALESCE(recording_created_at, NOW())
-         WHERE session_token = $3`,
-        [path.basename(webmPath), stats.size, sessionToken]
-      );
-      console.log("[recording-chunk] Recording path persisted early", {
-        sessionToken,
-        file: path.basename(webmPath),
-        size: stats.size,
-      });
-    } catch (err) {
-      console.warn("[recording-chunk] Early recording_path persist failed:", err.message);
-    }
-  }
 
   if (isFinal) {
     if (fs.existsSync(webmPath)) {

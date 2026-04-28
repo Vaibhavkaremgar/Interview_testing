@@ -22,8 +22,18 @@ async function recoverMissingRecordings() {
     .map((d) => d.name)
     .filter((name) => /\.(mp4|webm)$/i.test(name));
 
+  const bestBySession = new Map();
   for (const file of files) {
     const basename = path.basename(file);
+    const sessionToken = basename.replace(/\.(mp4|webm)$/i, "");
+    const format = basename.toLowerCase().endsWith(".mp4") ? "mp4" : "webm";
+    const existing = bestBySession.get(sessionToken);
+    if (!existing || (existing.format !== "mp4" && format === "mp4")) {
+      bestBySession.set(sessionToken, { basename, format });
+    }
+  }
+
+  for (const { basename, format } of bestBySession.values()) {
     try {
       const { rowCount } = await pool.query(
         "SELECT 1 FROM interview_sessions WHERE recording_path = $1 LIMIT 1",
@@ -35,8 +45,6 @@ async function recoverMissingRecordings() {
       const fullPath = path.join(RECORDINGS_DIR, basename);
       const stats = await fs.promises.stat(fullPath).catch(() => null);
       if (!stats) continue;
-
-      const format = basename.toLowerCase().endsWith(".mp4") ? "mp4" : "webm";
       const res = await pool.query(
         `UPDATE interview_sessions
            SET recording_path = $1,
