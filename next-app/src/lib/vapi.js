@@ -40,6 +40,10 @@ function getSessionByToken(token) {
       pendingEnd: false,
       finalizeTimer: null,
       recordingUrl: null,
+      finalTranscript: "",
+      artifactProcessed: false,
+      finalizing: false,
+      evaluationSaved: false,
     });
   }
   return sessionsByToken.get(t);
@@ -220,15 +224,16 @@ function buildInsufficientDataEvaluation(transcriptWordCount = 0) {
 
 async function evaluateCandidate(session, transcript) {
   const transcriptWordCount = (transcript || "").trim().split(/\s+/).filter(Boolean).length;
-  const userWordCount = session.transcript
-    .filter(e => normalizeRole(e.role) === "user")
-    .map(e => e.content || "")
+  const userTranscript = (transcript || "")
+    .split("\n")
+    .filter(line => line.trim().toUpperCase().startsWith("USER:"))
+    .map(line => line.replace(/^USER:\s*/i, ""))
     .join(" ")
     .trim()
     .split(/\s+/)
     .filter(Boolean).length;
 
-  if (userWordCount === 0) return buildInsufficientDataEvaluation(0);
+  if (userTranscript === 0) return buildInsufficientDataEvaluation(0);
   if (transcriptWordCount < 20) {
     return buildInsufficientDataEvaluation(transcriptWordCount);
   }
@@ -317,20 +322,6 @@ function buildTranscriptText(session) {
     .join("\n\n");
 }
 
-async function persistSnapshot(session) {
-  if (!DB_READY || !pool) return;
-  if (!session.asyncToken) return;
-  const snapshot = buildTranscriptText(session);
-  try {
-    await pool.query(
-      `UPDATE interview_sessions SET last_transcript_snapshot = $1, last_activity_at = NOW() WHERE session_token = $2`,
-      [snapshot, session.asyncToken]
-    );
-  } catch (e) {
-    console.warn("Could not persist transcript snapshot:", e.message);
-  }
-}
-
 function scheduleFinalize(token, session) {
   if (session.finalizeTimer) clearTimeout(session.finalizeTimer);
   session.finalizeTimer = setTimeout(() => finalizeSession(token).catch(() => {}), RECONNECT_GRACE_MS);
@@ -339,17 +330,24 @@ function scheduleFinalize(token, session) {
 
 async function finalizeSession(token) {
   const session = sessionsByToken.get(token);
-  if (!session || !session.pendingEnd) return;
+  if (!session || !session.pendingEnd || session.evaluationSaved || session.finalizing) return;
+  session.finalizing = true;
+  try {
+    const transcript = (session.finalTranscript || "").trim();
+    if (!transcript) return;
 
-  const transcript = buildTranscriptText(session);
-  const evaluation = await evaluateCandidate(session, transcript);
-  await saveEvaluation(session, evaluation, transcript, session.recordingUrl);
+    const evaluation = await evaluateCandidate(session, transcript);
+    await saveEvaluation(session, evaluation, transcript, session.recordingUrl);
+    session.evaluationSaved = true;
 
-  if (session.finalizeTimer) clearTimeout(session.finalizeTimer);
-  sessionsByToken.delete(token);
-  // Clean up any call mappings for this token
-  for (const [cid, t] of Array.from(callToToken.entries())) {
-    if (t === token) callToToken.delete(cid);
+    if (session.finalizeTimer) clearTimeout(session.finalizeTimer);
+    sessionsByToken.delete(token);
+    // Clean up any call mappings for this token
+    for (const [cid, t] of Array.from(callToToken.entries())) {
+      if (t === token) callToToken.delete(cid);
+    }
+  } finally {
+    session.finalizing = false;
   }
 }
 
@@ -401,28 +399,28 @@ async function processWebhook(body) {
     if (messageType === "assistant-request" || messageType === "tool-calls") return;
 
     if (messageType === "transcript") {
-      const role = body?.message?.role || "unknown";
-      const text = body?.message?.transcript || "";
-      if (isTranscriptRoleAllowed(role)) {
-        pushTranscript(session, role, text);
-        await persistSnapshot(session);
-        if (session.pendingEnd) scheduleFinalize(token, session);
-      }
+      // Live transcript is UI-only; do not persist transcript events to DB.
       return;
     }
 
     if (messageType === "end-of-call-report") {
+      if (session.artifactProcessed) return;
+      session.artifactProcessed = true;
+
       const vapiMessages = body?.message?.artifact?.messages || [];
+      const artifactTranscript = [];
       if (vapiMessages.length) {
         for (const m of vapiMessages) {
           const role = m.role || "unknown";
           const text = m.message || "";
           if (isTranscriptRoleAllowed(role)) {
-            pushTranscript(session, role, text);
+            const normalizedRole = normalizeRole(role) === "user" ? "user" : "assistant";
+            const trimmed = (text || "").trim();
+            if (trimmed) artifactTranscript.push(`${normalizedRole.toUpperCase()}: ${trimmed}`);
           }
         }
-        await persistSnapshot(session);
       }
+      session.finalTranscript = artifactTranscript.join("\n\n");
 
       const asyncToken =
         body?.message?.call?.assistantOverrides?.variableValues?.session ||

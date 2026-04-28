@@ -11,7 +11,7 @@ export function OPTIONS() {
 }
 
 export async function POST(request) {
-  const { session_token, transcript_so_far } = await request.json().catch(() => ({}));
+  const { session_token } = await request.json().catch(() => ({}));
   const validation = await validateInterviewSessionToken(session_token);
   if (!validation.ok) {
     return withCors(NextResponse.json({ success: false, error: validation.error }, { status: validation.status }));
@@ -23,8 +23,8 @@ export async function POST(request) {
   startSessionWorker();
   await ensureColumns();
   pool.query(
-    `UPDATE interview_sessions SET last_transcript_snapshot = $1, last_activity_at = NOW() WHERE session_token = $2`,
-    [transcript_so_far || "", session_token]
+    `UPDATE interview_sessions SET last_activity_at = NOW() WHERE session_token = $1`,
+    [session_token]
   ).then(() => {
     console.log("[session] heartbeat", { sessionToken: session_token });
   }).catch(e => console.warn("Heartbeat save failed:", e.message));
