@@ -68,8 +68,12 @@ export default function InterviewPage() {
       let camOffSince        = null;
       let lastRole           = null;
       let lastEntry          = null;
+      let gracefulEndTimer   = null;
+      let callEnded          = false;
+      let completionPromptShown = false;
       const tappedElements   = new WeakSet();
       const PROCTORING_BOOT_DELAY_MS = 3000;
+      const GRACEFUL_END_DELAY_MS = 7000;
       const proctoringConfig = {
         enableFacePresence: true,
         enableHeadPose: true,
@@ -103,6 +107,37 @@ export default function InterviewPage() {
       function showExpired(msg) {
         if (statusOverlay) statusOverlay.style.display = "flex";
         setStatus(msg || "Interview link is no longer available.");
+      }
+      function clearGracefulEndTimer() {
+        if (gracefulEndTimer) {
+          clearTimeout(gracefulEndTimer);
+          gracefulEndTimer = null;
+        }
+      }
+      function showCompletionPrompt() {
+        completionPromptShown = true;
+        if (callInfo) callInfo.textContent = "Interview complete";
+        setLiveIndicator("Interview complete. Please click the Leave button if the call does not end automatically.");
+      }
+      function showWrappingUpMessage() {
+        if (callInfo) callInfo.textContent = "Interview wrapping up";
+        setLiveIndicator("Interview complete. The call will end shortly.");
+      }
+      function scheduleGracefulEnd() {
+        if (gracefulExitScheduled || callEnded) return;
+        gracefulExitScheduled = true;
+        showWrappingUpMessage();
+        clearGracefulEndTimer();
+        gracefulEndTimer = setTimeout(() => {
+          if (!vapi || callEnded) return;
+          try {
+            vapi.send({ type: "add-message", message: { role: "system", content: "Thank you for attending the interview. We are ending the call now." } });
+          } catch (_) {}
+          try { vapi.stop(); } catch (_) {}
+          setTimeout(() => {
+            if (!callEnded) showCompletionPrompt();
+          }, 3000);
+        }, GRACEFUL_END_DELAY_MS);
       }
 
       window.addEventListener("beforeunload", () => {
@@ -185,31 +220,30 @@ export default function InterviewPage() {
       function addTranscript(role, text) {
         if (!text.trim()) return;
         const lower = text.toLowerCase();
-        // Detect agent closing statements to expect a short user acknowledgement next.
+        // Detect agent closing statements and begin the graceful end countdown.
         if (role === "agent" && (
           lower.includes("recruiter will get in touch") ||
           lower.includes("we will get in touch") ||
           lower.includes("we'll get in touch") ||
           lower.includes("thanks for your time") ||
+          lower.includes("thank you for your time") ||
+          lower.includes("thank you") ||
           lower.includes("this concludes the interview") ||
-          lower.includes("that's all from my side")
+          lower.includes("that's all from my side") ||
+          lower.includes("that concludes") ||
+          lower.includes("we have reached the end")
         )) {
           awaitingClosingAck = true;
+          scheduleGracefulEnd();
         }
-        // If user responds with gratitude while we're awaiting closure, end gracefully.
-        if (role === "user" && awaitingClosingAck && !gracefulExitScheduled && (
+        // Keep showing the closing prompt if the user responds while the call is wrapping up.
+        if (role === "user" && awaitingClosingAck && !completionPromptShown && (
           lower.includes("thank you") ||
           lower.includes("thanks") ||
           lower.includes("bye") ||
           lower.includes("goodbye")
         )) {
-          gracefulExitScheduled = true;
-          if (vapi) {
-            vapi.send({ type: "add-message", message: { role: "system", content: "Thank you for your time. We are ending the call now." } });
-            setTimeout(() => { try { vapi.stop(); } catch (_) {} endCall(); }, 600);
-          } else {
-            endCall();
-          }
+          showCompletionPrompt();
         }
         if (role === lastRole && lastEntry) {
           lastEntry.querySelector(".text").textContent += " " + text.trim();
@@ -422,6 +456,8 @@ export default function InterviewPage() {
         gazeAwaySince = null;
         awaitingClosingAck = false;
         gracefulExitScheduled = false;
+        completionPromptShown = false;
+        clearGracefulEndTimer();
       }
 
       function startFaceProctoring() {
@@ -604,6 +640,9 @@ export default function InterviewPage() {
       }
 
       async function endCall() {
+        if (callEnded) return;
+        callEnded = true;
+        clearGracefulEndTimer();
         clearInterval(timerInterval);
         stopCamWarning();
         stopFaceProctoring();
@@ -641,7 +680,12 @@ export default function InterviewPage() {
         if (isCamOff) startCamWarning(); else stopCamWarning();
       });
 
-      endBtn.addEventListener("click", () => { if (vapi) vapi.stop(); endCall(); });
+      endBtn.addEventListener("click", () => {
+        if (vapi) {
+          try { vapi.stop(); } catch (_) {}
+        }
+        endCall();
+      });
 
       function handleTabSwitch() {
         if (!vapi) return;
@@ -676,6 +720,11 @@ export default function InterviewPage() {
 
         tabSwitchCount = 0;
         proctoringTerminated = false;
+        awaitingClosingAck = false;
+        gracefulExitScheduled = false;
+        callEnded = false;
+        completionPromptShown = false;
+        clearGracefulEndTimer();
         const sessionToken = getParam("session") || "";
         let resumeData = null;
         if (sessionToken) {
@@ -784,6 +833,10 @@ export default function InterviewPage() {
         });
 
         vapi.on("error", (err) => {
+          if (gracefulExitScheduled || completionPromptShown || callEnded) {
+            showCompletionPrompt();
+            return;
+          }
           setStatus("Connection error: " + (err.message || JSON.stringify(err)));
           if (statusOverlay) statusOverlay.style.display = "flex";
           if (sessionToken) {
@@ -874,7 +927,8 @@ export default function InterviewPage() {
 
       <div id="endedScreen">
         <h2>Interview Completed</h2>
-        <p>Thank you for your time. We&apos;ll be in touch soon.</p>
+        <p>Thank you for attending the interview.</p>
+        <p>You may close this window now.</p>
         <p id="endedName" style={{color:"#a78bfa",fontWeight:600}}></p>
       </div>
 
@@ -948,7 +1002,7 @@ export default function InterviewPage() {
         <button className="ctrl-btn active" id="camBtn" title="Camera on/off">
           <svg viewBox="0 0 24 24"><path d="M17 10.5V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3.5l4 4v-11l-4 4z"/></svg>
         </button>
-        <button className="ctrl-btn danger" id="endBtn" title="End interview">
+        <button className="ctrl-btn danger" id="endBtn" title="Leave call">
           <svg viewBox="0 0 24 24"><path d="M4.51 15.48c1.69-1.69 4.26-2.48 6.99-2.48 2.73 0 5.3.79 6.99 2.48l2.12-2.12C18.13 11.03 14.93 10 11.5 10s-6.63 1.03-9.11 3.36l2.12 2.12z"/></svg>
         </button>
       </div>
