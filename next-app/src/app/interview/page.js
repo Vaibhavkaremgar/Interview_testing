@@ -73,7 +73,7 @@ export default function InterviewPage() {
       let completionPromptShown = false;
       const tappedElements   = new WeakSet();
       const PROCTORING_BOOT_DELAY_MS = 3000;
-      const GRACEFUL_END_DELAY_MS = 7000;
+      const GRACEFUL_END_DELAY_MS = 10000;
       const proctoringConfig = {
         enableFacePresence: true,
         enableHeadPose: true,
@@ -123,20 +123,20 @@ export default function InterviewPage() {
         if (callInfo) callInfo.textContent = "Interview wrapping up";
         setLiveIndicator("Interview complete. The call will end shortly.");
       }
+      function stopCallAfterGracePeriod() {
+        if (!vapi || callEnded) return;
+        try { vapi.stop(); } catch (_) {}
+        setTimeout(() => {
+          if (!callEnded) showCompletionPrompt();
+        }, 3000);
+      }
       function scheduleGracefulEnd() {
-        if (gracefulExitScheduled || callEnded) return;
+        if (callEnded) return;
         gracefulExitScheduled = true;
         showWrappingUpMessage();
         clearGracefulEndTimer();
         gracefulEndTimer = setTimeout(() => {
-          if (!vapi || callEnded) return;
-          try {
-            vapi.send({ type: "add-message", message: { role: "system", content: "Thank you for attending the interview. We are ending the call now." } });
-          } catch (_) {}
-          try { vapi.stop(); } catch (_) {}
-          setTimeout(() => {
-            if (!callEnded) showCompletionPrompt();
-          }, 3000);
+          stopCallAfterGracePeriod();
         }, GRACEFUL_END_DELAY_MS);
       }
 
@@ -234,6 +234,10 @@ export default function InterviewPage() {
           lower.includes("we have reached the end")
         )) {
           awaitingClosingAck = true;
+          scheduleGracefulEnd();
+        }
+        // If the candidate responds after the closing line, give them a fresh 10-second window.
+        if (role === "user" && awaitingClosingAck) {
           scheduleGracefulEnd();
         }
         // Keep showing the closing prompt if the user responds while the call is wrapping up.
