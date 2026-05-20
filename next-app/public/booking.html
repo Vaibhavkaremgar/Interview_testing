@@ -467,7 +467,9 @@ async function init() {
 
 async function hydrateLinkDetails() {
   if (bookingToken) {
-    const ok = await hydrateFromBookingToken(bookingToken);
+    const ok = await hydrateFromBookingToken(bookingToken, {
+      allowQueryFallback: hasPrefilledIdentity(),
+    });
     return ok ? { kind: "booking-token" } : { kind: "invalid" };
   }
 
@@ -482,20 +484,28 @@ async function hydrateLinkDetails() {
       return { kind: "legacy-booking-token" };
     }
 
-    showStatus("This booking link is invalid or has already been used.", "error");
+    if (!hasPrefilledIdentity()) {
+      showStatus("This booking link is invalid or has already been used.", "error");
+    }
     return { kind: "invalid" };
   }
 
-  showStatus("Missing booking token in the link.", "error");
+  if (!hasPrefilledIdentity()) {
+    showStatus("Missing booking token in the link.", "error");
+  }
   return { kind: "missing" };
 }
 
-async function hydrateFromBookingToken(rawToken, { silent = false } = {}) {
+function hasPrefilledIdentity() {
+  return !!(cfg.name && cfg.email);
+}
+
+async function hydrateFromBookingToken(rawToken, { silent = false, allowQueryFallback = false } = {}) {
   try {
     const res  = await fetch(`/api/booking-token/${encodeURIComponent(rawToken)}`);
     const data = await res.json();
     if (!data.success) {
-      if (!silent) showStatus(data.error || "Invalid booking link", "error");
+      if (!silent && !allowQueryFallback) showStatus(data.error || "Invalid booking link", "error");
       return false;
     }
 
@@ -507,7 +517,7 @@ async function hydrateFromBookingToken(rawToken, { silent = false } = {}) {
     cfg.interviewQuestions = data.interview_questions || data.async_questions || data.asyncQuestions || [];
     return true;
   } catch (e) {
-    if (!silent) showStatus("Failed to load booking details", "error");
+    if (!silent && !allowQueryFallback) showStatus("Failed to load booking details", "error");
     return false;
   }
 }
