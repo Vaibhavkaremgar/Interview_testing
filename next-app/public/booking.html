@@ -240,6 +240,38 @@
   .status-bar.success { background: #e6f4ea; color: #137333; display: block; }
   .status-bar.error   { background: #fce8e6; color: #c5221f; display: block; }
 
+  .session-link-box {
+    margin: 0 32px 20px;
+    padding: 16px;
+    border: 1px solid #d2e3fc;
+    border-radius: 12px;
+    background: #eef4ff;
+    display: none;
+  }
+  .session-link-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: #174ea6;
+    margin-bottom: 6px;
+  }
+  .session-link-text {
+    font-size: 0.88rem;
+    color: #355a9b;
+    line-height: 1.5;
+    margin-bottom: 12px;
+  }
+  .session-link-btn {
+    display: inline-block;
+    padding: 10px 18px;
+    background: #1a73e8;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  .session-link-btn:hover { background: #1557b0; }
+
   /* -- MANUAL FIELDS (if no name/email in URL) -- */
   .manual-fields {
     padding: 16px 32px 0;
@@ -364,6 +396,11 @@
 
   <!-- STATUS -->
   <div class="status-bar" id="statusBar"></div>
+  <div class="session-link-box" id="sessionLinkBox">
+    <div class="session-link-title">Interview already scheduled</div>
+    <div class="session-link-text" id="sessionLinkText"></div>
+    <a class="session-link-btn" id="sessionLinkBtn" href="/interview">Open Interview</a>
+  </div>
 
   <!-- FOOTER -->
   <div class="footer">
@@ -374,7 +411,8 @@
 </div>
 <script>
 const p = new URLSearchParams(window.location.search);
-const token = p.get("token") || p.get("session") || p.get("sessionToken");
+const bookingToken = (p.get("token") || "").trim();
+const sessionToken = (p.get("session") || p.get("sessionToken") || "").trim();
 const cfg = {
   name:          p.get("candidateName") || p.get("name")         || "",
   email:         p.get("email")                                   || "",
@@ -402,25 +440,16 @@ let viewMonth    = new Date().getMonth();
 let serverTodayStr = localDateStr(new Date());
 let serverNowIso = null;
 let serverNowMinutes = null;
+let bookingLocked = false;
 
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const MONTHS = ["January","February","March","April","May","June",
                 "July","August","September","October","November","December"];
 
 async function init() {
-  if (token) {
-    try {
-      const res  = await fetch(`/api/booking-token/${encodeURIComponent(token)}`);
-      const data = await res.json();
-      if (data.success) {
-        cfg.name = data.name; cfg.email = data.email;
-        cfg.resume = data.resume_text; cfg.jobDescription = data.job_description;
-        cfg.jobRole = data.job_title; cfg.agencyId = data.agency_id;
-        cfg.candidateId = data.candidate_id; cfg.jobId = data.job_id;
-        cfg.userId = data.user_id;
-        cfg.interviewQuestions = data.interview_questions || data.async_questions || data.asyncQuestions || [];
-      } else { showStatus(data.error || "Invalid booking link", "error"); }
-    } catch(e) { showStatus("Failed to load booking details", "error"); }
+  const linkState = await hydrateLinkDetails();
+  if (linkState.kind === "session") {
+    lockBookingUi();
   }
 
   if (cfg.name && cfg.email) {
@@ -434,6 +463,98 @@ async function init() {
   }
 
   await loadSlots();
+}
+
+async function hydrateLinkDetails() {
+  if (bookingToken) {
+    const ok = await hydrateFromBookingToken(bookingToken);
+    return ok ? { kind: "booking-token" } : { kind: "invalid" };
+  }
+
+  if (sessionToken) {
+    const sessionData = await hydrateFromSessionToken(sessionToken);
+    if (sessionData) {
+      return { kind: "session", data: sessionData };
+    }
+
+    const legacyBookingTokenResolved = await hydrateFromBookingToken(sessionToken, { silent: true });
+    if (legacyBookingTokenResolved) {
+      return { kind: "legacy-booking-token" };
+    }
+
+    showStatus("This booking link is invalid or has already been used.", "error");
+    return { kind: "invalid" };
+  }
+
+  showStatus("Missing booking token in the link.", "error");
+  return { kind: "missing" };
+}
+
+async function hydrateFromBookingToken(rawToken, { silent = false } = {}) {
+  try {
+    const res  = await fetch(`/api/booking-token/${encodeURIComponent(rawToken)}`);
+    const data = await res.json();
+    if (!data.success) {
+      if (!silent) showStatus(data.error || "Invalid booking link", "error");
+      return false;
+    }
+
+    cfg.name = data.name; cfg.email = data.email;
+    cfg.resume = data.resume_text; cfg.jobDescription = data.job_description;
+    cfg.jobRole = data.job_title; cfg.agencyId = data.agency_id;
+    cfg.candidateId = data.candidate_id; cfg.jobId = data.job_id;
+    cfg.userId = data.user_id;
+    cfg.interviewQuestions = data.interview_questions || data.async_questions || data.asyncQuestions || [];
+    return true;
+  } catch (e) {
+    if (!silent) showStatus("Failed to load booking details", "error");
+    return false;
+  }
+}
+
+async function hydrateFromSessionToken(rawSessionToken) {
+  try {
+    const res = await fetch(`/api/session-info/${encodeURIComponent(rawSessionToken)}`);
+    const data = await res.json();
+    if (!data.success) return null;
+
+    cfg.name = data.name || cfg.name;
+    cfg.email = data.email || cfg.email;
+    cfg.resume = data.resume_text || cfg.resume;
+    cfg.jobDescription = data.job_description || cfg.jobDescription;
+    cfg.jobRole = data.job_title || cfg.jobRole;
+    cfg.agencyId = data.agency_id || cfg.agencyId;
+    cfg.candidateId = data.candidate_id || cfg.candidateId;
+    cfg.jobId = data.job_id || cfg.jobId;
+    cfg.userId = data.user_id || cfg.userId;
+    cfg.interviewQuestions = data.interview_questions || [];
+
+    const slotText = data.slot_date && data.slot_time
+      ? `Your interview is already booked for ${data.slot_date} at ${data.slot_time}.`
+      : "Your interview has already been booked.";
+    showStatus(slotText, "success");
+    showSessionLink(rawSessionToken, slotText);
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+function lockBookingUi() {
+  bookingLocked = true;
+  selectedSlot = null;
+  document.getElementById("bookBtn").disabled = true;
+  document.getElementById("bookBtn").textContent = "Already Booked";
+  document.getElementById("selectedSummary").textContent = "This interview already has a scheduled session.";
+}
+
+function showSessionLink(tokenValue, text) {
+  const box = document.getElementById("sessionLinkBox");
+  const textEl = document.getElementById("sessionLinkText");
+  const linkEl = document.getElementById("sessionLinkBtn");
+  textEl.textContent = text;
+  linkEl.href = `/interview?session=${encodeURIComponent(tokenValue)}`;
+  box.style.display = "block";
 }
 
 async function loadSlots() {
@@ -504,6 +625,7 @@ function renderCalendar() {
 }
 
 function selectDate(dateStr) {
+  if (bookingLocked) return;
   selectedDate = dateStr;
   selectedSlot = null;
   document.getElementById("bookBtn").disabled = true;
@@ -553,6 +675,7 @@ function renderTimeSlots(dateStr) {
 }
 
 function selectSlot(slot, btnEl) {
+  if (bookingLocked) return;
   selectedSlot = slot;
   document.querySelectorAll(".time-btn").forEach(b => b.classList.remove("selected"));
   btnEl.classList.add("selected");
@@ -571,6 +694,7 @@ function updateSummary() {
 }
 
 document.getElementById("bookBtn").addEventListener("click", async () => {
+  if (bookingLocked) return;
   const name  = cfg.name  || document.getElementById("nameInput")?.value.trim();
   const email = cfg.email || document.getElementById("emailInput")?.value.trim();
   if (!name || !email)  { showStatus("Please enter your name and email.", "error"); return; }
@@ -586,7 +710,7 @@ document.getElementById("bookBtn").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         slot_id: selectedSlot.slot_id, name, email,
-        bookingToken: token || "",
+        bookingToken: bookingToken || sessionToken || "",
         interviewQuestions: cfg.interviewQuestions || [],
         resume: cfg.resume, jobDescription: cfg.jobDescription,
         jobRole: cfg.jobRole, agencyId: cfg.agencyId,
@@ -631,12 +755,12 @@ function showStatus(msg, type) {
   el.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-if (!token) {
+if (!bookingToken && !sessionToken) {
   document.body.innerHTML = `
     <div style="max-width:720px;margin:64px auto;padding:32px;border-radius:16px;
                 background:#fff;box-shadow:0 6px 30px rgba(0,0,0,0.12);font-family:Arial,sans-serif;">
       <h1 style="margin-bottom:12px;font-size:22px;color:#1a73e8;">Invalid or missing booking link</h1>
-      <p style="margin-bottom:12px;color:#4a5568;">This page requires a valid session token. Please open the booking link sent to your email.</p>
+      <p style="margin-bottom:12px;color:#4a5568;">This page requires a valid booking link token. Please open the latest booking link sent to your email.</p>
       <p style="color:#6b7280;">If you believe this is an error, request a fresh booking link from your recruiter.</p>
     </div>`;
 } else {
