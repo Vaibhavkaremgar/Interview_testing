@@ -2,11 +2,16 @@
 
 const DB_URL = process.env.DATABASE_URL || "";
 const DB_READY = DB_URL.length > 0 && !DB_URL.includes("user:password");
+const DB_SSL = (process.env.DATABASE_SSL || "true").toString().trim().toLowerCase();
+const ssl =
+  DB_SSL === "false" || DB_SSL === "0" || DB_SSL === "no"
+    ? false
+    : { rejectUnauthorized: false };
 
 const pool = DB_READY
   ? new Pool({
       connectionString: DB_URL,
-      ssl: { rejectUnauthorized: false },
+      ssl,
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,

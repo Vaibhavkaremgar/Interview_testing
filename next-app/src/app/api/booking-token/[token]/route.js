@@ -23,19 +23,39 @@ export async function GET(request, { params }) {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT payload, agency_id, candidate_id, job_id, user_id
+      `SELECT payload, agency_id, candidate_id, job_id, user_id,
+              is_active, expires_at, consumed_at
        FROM notification_workflow_tokens
-       WHERE token = $1 AND is_active = true AND expires_at > NOW()`
+       WHERE token = $1`
       , [token]
     );
     if (!rows.length) {
+      console.warn("[booking-token] token not found", { token });
       return withCors(NextResponse.json({ success: false, error: "Token invalid, expired, or already used" }, { status: 404 }));
     }
-    let payload = rows[0].payload || {};
+
+    const row = rows[0];
+    const isActive = row.is_active === null || row.is_active === undefined ? true : row.is_active === true;
+    const isExpired = row.expires_at ? new Date(row.expires_at).getTime() <= Date.now() : false;
+    const isConsumed = !!row.consumed_at;
+
+    if (!isActive || isExpired || isConsumed) {
+      console.warn("[booking-token] token rejected", {
+        token,
+        isActive,
+        isExpired,
+        isConsumed,
+        expiresAt: row.expires_at,
+        consumedAt: row.consumed_at,
+      });
+      return withCors(NextResponse.json({ success: false, error: "Token invalid, expired, or already used" }, { status: 404 }));
+    }
+
+    let payload = row.payload || {};
     if (typeof payload === "string") {
       try { payload = JSON.parse(payload); } catch { payload = {}; }
     }
-    const { agency_id, candidate_id, job_id, user_id } = rows[0];
+    const { agency_id, candidate_id, job_id, user_id } = row;
     const pick = (obj, keys, fallback = "") => {
       for (const k of keys) {
         if (obj && obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== "") return obj[k];
