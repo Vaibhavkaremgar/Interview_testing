@@ -509,12 +509,26 @@ async function hydrateFromBookingToken(rawToken, { silent = false, allowQueryFal
       return false;
     }
 
-    cfg.name = data.name; cfg.email = data.email;
-    cfg.resume = data.resume_text; cfg.jobDescription = data.job_description;
-    cfg.jobRole = data.job_title; cfg.agencyId = data.agency_id;
-    cfg.candidateId = data.candidate_id; cfg.jobId = data.job_id;
-    cfg.userId = data.user_id;
+    cfg.name = data.name || cfg.name;
+    cfg.email = data.email || cfg.email;
+    cfg.resume = data.resume_text || cfg.resume;
+    cfg.jobDescription = data.job_description || cfg.jobDescription;
+    cfg.jobRole = data.job_title || cfg.jobRole;
+    cfg.agencyId = data.agency_id || cfg.agencyId;
+    cfg.candidateId = data.candidate_id || cfg.candidateId;
+    cfg.jobId = data.job_id || cfg.jobId;
+    cfg.userId = data.user_id || cfg.userId;
     cfg.interviewQuestions = data.interview_questions || data.async_questions || data.asyncQuestions || [];
+
+    if (data.already_booked && data.session_token) {
+      const slotText = data.slot_date && data.slot_time
+        ? `Your interview is already booked for ${data.slot_date} at ${data.slot_time}.`
+        : "Your interview has already been booked.";
+      showStatus(slotText, "success");
+      showSessionLink(data.session_token, slotText);
+      lockBookingUi();
+    }
+
     return true;
   } catch (e) {
     if (!silent && !allowQueryFallback) showStatus("Failed to load booking details", "error");

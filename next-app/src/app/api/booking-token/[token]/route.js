@@ -8,6 +8,52 @@ export function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders });
 }
 
+function parsePayload(rawPayload) {
+  if (!rawPayload) return {};
+  if (typeof rawPayload === "string") {
+    try {
+      return JSON.parse(rawPayload);
+    } catch {
+      return {};
+    }
+  }
+  return rawPayload;
+}
+
+function firstNonEmpty(values = [], fallback = "") {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+function pickDeep(payload, keys = [], fallback = "") {
+  const containers = [
+    payload,
+    payload?.candidate,
+    payload?.candidate_details,
+    payload?.candidateDetails,
+    payload?.job,
+    payload?.job_details,
+    payload?.jobDetails,
+    payload?.metadata,
+    payload?.data,
+  ].filter(Boolean);
+
+  for (const container of containers) {
+    for (const key of keys) {
+      const value = container?.[key];
+      if (value !== undefined && value !== null && String(value).trim() !== "") {
+        return value;
+      }
+    }
+  }
+
+  return fallback;
+}
+
 export async function GET(request, { params }) {
   const url = new URL(request.url);
   const tokenFromQuery = url.searchParams.get("token");
@@ -40,6 +86,41 @@ export async function GET(request, { params }) {
     const isConsumed = !!row.consumed_at;
 
     if (!isActive || isExpired || isConsumed) {
+      const linkedSession = await client.query(
+        `SELECT s.candidate_name, s.email, s.resume_text, s.job_role, s.jd_text,
+                s.agency_id, s.candidate_id, s.job_id, s.user_id, s.session_token,
+                slot.slot_date, slot.slot_time
+         FROM interview_sessions s
+         LEFT JOIN interview_slots slot ON slot.id = s.slot_id
+         WHERE ($1::uuid IS NULL OR s.candidate_id = $1)
+           AND ($2::uuid IS NULL OR s.job_id = $2)
+           AND ($3::uuid IS NULL OR s.user_id = $3)
+         ORDER BY s.created_at DESC
+         LIMIT 1`,
+        [row.candidate_id || null, row.job_id || null, row.user_id || null]
+      ).catch(() => ({ rows: [] }));
+
+      if (linkedSession.rows?.length) {
+        const s = linkedSession.rows[0];
+        return withCors(NextResponse.json({
+          success: true,
+          already_booked: true,
+          session_token: s.session_token,
+          name: s.candidate_name || "",
+          email: s.email || "",
+          resume_text: s.resume_text || "",
+          job_title: s.job_role || "",
+          job_description: s.jd_text || "",
+          agency_id: s.agency_id || "",
+          candidate_id: s.candidate_id || "",
+          job_id: s.job_id || "",
+          user_id: s.user_id || "",
+          slot_date: s.slot_date || null,
+          slot_time: s.slot_time ? s.slot_time.toString().slice(0, 8) : null,
+          interview_questions: [],
+        }));
+      }
+
       console.warn("[booking-token] token rejected", {
         token,
         isActive,
@@ -51,29 +132,47 @@ export async function GET(request, { params }) {
       return withCors(NextResponse.json({ success: false, error: "Token invalid, expired, or already used" }, { status: 404 }));
     }
 
-    let payload = row.payload || {};
-    if (typeof payload === "string") {
-      try { payload = JSON.parse(payload); } catch { payload = {}; }
-    }
+    const payload = parsePayload(row.payload);
     const { agency_id, candidate_id, job_id, user_id } = row;
-    const pick = (obj, keys, fallback = "") => {
-      for (const k of keys) {
-        if (obj && obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== "") return obj[k];
+    const fallbackData = { name: "", email: "", resume_text: "", job_title: "", job_description: "" };
+
+    if (candidate_id || job_id) {
+      const fallback = await client.query(
+        `SELECT c.name, c.email, c.resume_text, jd.title AS job_title, jd.description AS job_description
+         FROM candidates c
+         LEFT JOIN job_descriptions jd ON jd.id = $2
+         WHERE c.id = $1
+         LIMIT 1`,
+        [candidate_id || null, job_id || null]
+      ).catch(() => ({ rows: [] }));
+
+      if (fallback.rows?.length) {
+        fallbackData.name = fallback.rows[0].name || "";
+        fallbackData.email = fallback.rows[0].email || "";
+        fallbackData.resume_text = fallback.rows[0].resume_text || "";
+        fallbackData.job_title = fallback.rows[0].job_title || "";
+        fallbackData.job_description = fallback.rows[0].job_description || "";
       }
-      return fallback;
-    };
+    }
+
     return withCors(NextResponse.json({
       success: true,
-      name: pick(payload, ["candidate_name", "candidateName", "name"]),
-      email: pick(payload, ["email", "candidate_email", "candidateEmail"]),
-      resume_text: pick(payload, ["resume_text", "resume", "resumeText"]),
-      job_title: pick(payload, ["job_title", "job_role", "jobRole", "role", "title"]),
-      job_description: pick(payload, ["job_description", "jobDescription", "jd_text", "jd", "description"]),
-      agency_id: pick(payload, ["agency_id", "agencyId"], agency_id || ""),
-      candidate_id: pick(payload, ["candidate_id", "candidateId"], candidate_id || ""),
-      job_id: pick(payload, ["job_id", "jobId"], job_id || ""),
-      user_id: pick(payload, ["user_id", "userId"], user_id || ""),
-      interview_questions: payload.interview_questions || payload.async_questions || payload.asyncQuestions || [],
+      name: pickDeep(payload, ["candidate_name", "candidateName", "name", "full_name", "fullName"], fallbackData.name),
+      email: pickDeep(payload, ["email", "candidate_email", "candidateEmail", "mail"], fallbackData.email),
+      resume_text: pickDeep(payload, ["resume_text", "resume", "resumeText"], fallbackData.resume_text),
+      job_title: pickDeep(payload, ["job_title", "job_role", "jobRole", "role", "title"], fallbackData.job_title),
+      job_description: pickDeep(payload, ["job_description", "jobDescription", "jd_text", "jd", "description"], fallbackData.job_description),
+      agency_id: pickDeep(payload, ["agency_id", "agencyId"], agency_id || ""),
+      candidate_id: pickDeep(payload, ["candidate_id", "candidateId"], candidate_id || ""),
+      job_id: pickDeep(payload, ["job_id", "jobId"], job_id || ""),
+      user_id: pickDeep(payload, ["user_id", "userId"], user_id || ""),
+      interview_questions: firstNonEmpty([
+        payload.interview_questions,
+        payload.async_questions,
+        payload.asyncQuestions,
+        payload?.job?.interview_questions,
+        payload?.jobDetails?.interview_questions,
+      ], []),
     }));
   } catch (e) {
     console.error("booking-token error:", e.message);
