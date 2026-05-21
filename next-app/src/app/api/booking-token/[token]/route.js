@@ -29,6 +29,42 @@ function firstNonEmpty(values = [], fallback = "") {
   return fallback;
 }
 
+function normalizeKey(key = "") {
+  return String(key).replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+function findValueDeep(node, keys = [], seen = new Set()) {
+  if (!node || typeof node !== "object" || seen.has(node)) return undefined;
+  seen.add(node);
+
+  const normalizedKeys = new Set(keys.map(normalizeKey));
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const value = findValueDeep(item, keys, seen);
+      if (value !== undefined && value !== null && String(value).trim() !== "") {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  for (const [rawKey, rawValue] of Object.entries(node)) {
+    if (normalizedKeys.has(normalizeKey(rawKey)) && rawValue !== undefined && rawValue !== null && String(rawValue).trim() !== "") {
+      return rawValue;
+    }
+  }
+
+  for (const value of Object.values(node)) {
+    const deepValue = findValueDeep(value, keys, seen);
+    if (deepValue !== undefined && deepValue !== null && String(deepValue).trim() !== "") {
+      return deepValue;
+    }
+  }
+
+  return undefined;
+}
+
 function pickDeep(payload, keys = [], fallback = "") {
   const containers = [
     payload,
@@ -49,6 +85,11 @@ function pickDeep(payload, keys = [], fallback = "") {
         return value;
       }
     }
+  }
+
+  const nestedValue = findValueDeep(payload, keys);
+  if (nestedValue !== undefined && nestedValue !== null && String(nestedValue).trim() !== "") {
+    return nestedValue;
   }
 
   return fallback;

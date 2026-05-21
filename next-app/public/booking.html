@@ -445,6 +445,27 @@ let bookingLocked = false;
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const MONTHS = ["January","February","March","April","May","June",
                 "July","August","September","October","November","December"];
+function pickDeep(obj, keys) {
+  if (!obj || typeof obj !== "object") return "";
+  const normalized = keys.map(k => k.toLowerCase().replace(/[^a-z0-9]/g, ""));
+
+  function walk(node) {
+    if (!node || typeof node !== "object") return "";
+    for (const [k, v] of Object.entries(node)) {
+      const nk = k.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (normalized.includes(nk) && v != null && String(v).trim() !== "") {
+        return v;
+      }
+    }
+    for (const value of Object.values(node)) {
+      const found = walk(value);
+      if (found) return found;
+    }
+    return "";
+  }
+
+  return walk(obj);
+}
 
 async function init() {
   const linkState = await hydrateLinkDetails();
@@ -509,8 +530,8 @@ async function hydrateFromBookingToken(rawToken, { silent = false, allowQueryFal
       return false;
     }
 
-    cfg.name = data.name || cfg.name;
-    cfg.email = data.email || cfg.email;
+    cfg.name = data.name || pickDeep(data, ["candidateName", "candidate_name", "name", "fullName", "full_name"]) || cfg.name;
+    cfg.email = data.email || pickDeep(data, ["email", "candidateEmail", "candidate_email", "mail"]) || cfg.email;
     cfg.resume = data.resume_text || cfg.resume;
     cfg.jobDescription = data.job_description || cfg.jobDescription;
     cfg.jobRole = data.job_title || cfg.jobRole;
@@ -542,8 +563,8 @@ async function hydrateFromSessionToken(rawSessionToken) {
     const data = await res.json();
     if (!data.success) return null;
 
-    cfg.name = data.name || cfg.name;
-    cfg.email = data.email || cfg.email;
+    cfg.name = data.name || pickDeep(data, ["candidateName", "candidate_name", "name", "fullName", "full_name"]) || cfg.name;
+    cfg.email = data.email || pickDeep(data, ["email", "candidateEmail", "candidate_email", "mail"]) || cfg.email;
     cfg.resume = data.resume_text || cfg.resume;
     cfg.jobDescription = data.job_description || cfg.jobDescription;
     cfg.jobRole = data.job_title || cfg.jobRole;
