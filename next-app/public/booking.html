@@ -413,6 +413,7 @@
 const p = new URLSearchParams(window.location.search);
 const bookingToken = (p.get("token") || "").trim();
 const sessionToken = (p.get("session") || p.get("sessionToken") || "").trim();
+const API_BASE = "https://testing-production-0d3c.up.railway.app";
 const cfg = {
   name:          p.get("candidateName") || p.get("name")         || "",
   email:         p.get("email")                                   || "",
@@ -523,7 +524,7 @@ function hasPrefilledIdentity() {
 
 async function hydrateFromBookingToken(rawToken, { silent = false, allowQueryFallback = false } = {}) {
   try {
-    const res  = await fetch(`/api/booking-token/${encodeURIComponent(rawToken)}`);
+    const res  = await fetch(`${API_BASE}/api/booking-token/${encodeURIComponent(rawToken)}`);
     const data = await res.json();
     if (!data.success) {
       if (!silent && !allowQueryFallback) showStatus(data.error || "Invalid booking link", "error");
@@ -559,7 +560,7 @@ async function hydrateFromBookingToken(rawToken, { silent = false, allowQueryFal
 
 async function hydrateFromSessionToken(rawSessionToken) {
   try {
-    const res = await fetch(`/api/session-info/${encodeURIComponent(rawSessionToken)}`);
+    const res = await fetch(`${API_BASE}/api/session-info/${encodeURIComponent(rawSessionToken)}`);
     const data = await res.json();
     if (!data.success) return null;
 
@@ -598,13 +599,13 @@ function showSessionLink(tokenValue, text) {
   const textEl = document.getElementById("sessionLinkText");
   const linkEl = document.getElementById("sessionLinkBtn");
   textEl.textContent = text;
-  linkEl.href = `/interview?session=${encodeURIComponent(tokenValue)}`;
+  linkEl.href = `${API_BASE}/interview?session=${encodeURIComponent(tokenValue)}`;
   box.style.display = "block";
 }
 
 async function loadSlots() {
   try {
-    const res  = await fetch("/api/available-slots");
+    const res  = await fetch(`${API_BASE}/api/available-slots`);
     const data = await res.json();
     if (!data.success) throw new Error(data.error || "Failed to load slots");
     const serverNow = data.server_now_iso ? new Date(data.server_now_iso) : new Date();
@@ -750,7 +751,7 @@ document.getElementById("bookBtn").addEventListener("click", async () => {
   btn.textContent = "Booking...";
 
   try {
-    const res  = await fetch("/api/book-slot", {
+    const res  = await fetch(`${API_BASE}/api/book-slot`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
