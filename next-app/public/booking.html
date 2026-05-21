@@ -413,7 +413,9 @@
 const p = new URLSearchParams(window.location.search);
 const bookingToken = (p.get("token") || "").trim();
 const sessionToken = (p.get("session") || p.get("sessionToken") || "").trim();
-const API_BASE = "https://testing-production-0d3c.up.railway.app";
+const API_BASE = window.location.origin && /^https?:/i.test(window.location.origin)
+  ? window.location.origin
+  : "https://testing-production-0d3c.up.railway.app";
 const cfg = {
   name:          p.get("candidateName") || p.get("name")         || "",
   email:         p.get("email")                                   || "",

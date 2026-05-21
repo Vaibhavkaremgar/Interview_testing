@@ -8,6 +8,15 @@ const __dirname = dirname(__filename);
 const faceMeshShim = "./shims/mediapipe-face-mesh.js";
 
 const nextConfig = {
+  async redirects() {
+    return [
+      {
+        source: "/booking",
+        destination: "/booking.html",
+        permanent: false,
+      },
+    ];
+  },
   turbopack: {
     root: __dirname,
     // Alias the UMD-only package to a tiny ESM shim so Turbopack stops
