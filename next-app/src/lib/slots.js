@@ -2,7 +2,11 @@
 import { pool, DB_READY } from "./db.js";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const FRONTEND_INTERVIEW_URL = process.env.FRONTEND_INTERVIEW_URL || "http://localhost:3000/interview";
+const FRONTEND_INTERVIEW_URL =
+  process.env.FRONTEND_INTERVIEW_URL ||
+  process.env.INTERVIEW_BASE_URL ||
+  process.env.NEXT_PUBLIC_INTERVIEW_BASE_URL ||
+  "http://localhost:3000/interview";
 const CONCURRENT_INTERVIEWS = Number(process.env.CONCURRENT_INTERVIEWS) || 3;
 
 function localDateStr(date) {
@@ -197,6 +201,9 @@ function buildInterviewLink(sessionToken) {
 
   let url = base;
   if (url.endsWith("/")) url = url.slice(0, -1);
+  if (!/\/interview$/i.test(url)) {
+    url = `${url}/interview`;
+  }
   return `${url}?${params.toString()}`;
 }
 

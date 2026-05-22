@@ -8,7 +8,19 @@ export async function GET() {
 
   try {
     const html = await fs.readFile(filePath, "utf8");
-    return new Response(html, {
+    const interviewBaseUrl = (
+      process.env.INTERVIEW_BASE_URL ||
+      process.env.NEXT_PUBLIC_INTERVIEW_BASE_URL ||
+      ""
+    ).trim().replace(/\/+$/, "");
+    const configScript = `<script>window.__BOOKING_CONFIG__ = ${JSON.stringify({
+      interviewBaseUrl,
+    })};</script>`;
+    const renderedHtml = html.includes("</head>")
+      ? html.replace("</head>", `${configScript}</head>`)
+      : `${configScript}${html}`;
+
+    return new Response(renderedHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",

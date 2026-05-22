@@ -416,6 +416,7 @@ const sessionToken = (p.get("session") || p.get("sessionToken") || "").trim();
 const API_BASE = window.location.origin && /^https?:/i.test(window.location.origin)
   ? window.location.origin
   : "https://testing-production-0d3c.up.railway.app";
+const INTERVIEW_BASE = window.__BOOKING_CONFIG__?.interviewBaseUrl || API_BASE;
 const cfg = {
   name:          p.get("candidateName") || p.get("name")         || "",
   email:         p.get("email")                                   || "",
@@ -601,7 +602,7 @@ function showSessionLink(tokenValue, text) {
   const textEl = document.getElementById("sessionLinkText");
   const linkEl = document.getElementById("sessionLinkBtn");
   textEl.textContent = text;
-  linkEl.href = `${API_BASE}/interview?session=${encodeURIComponent(tokenValue)}`;
+  linkEl.href = `${INTERVIEW_BASE}/interview?session=${encodeURIComponent(tokenValue)}`;
   box.style.display = "block";
 }
 
