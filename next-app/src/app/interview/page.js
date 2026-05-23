@@ -203,8 +203,8 @@ export default function InterviewPage() {
             agencyName:     sd.agency_name     || "",
             agencyId:       sd.agency_id       || vv.agencyId,
             candidateId:    sd.candidate_id    || vv.candidateId,
-            userId:         vv.userId,
-            jobId:          vv.jobId,
+            userId:         sd.user_id         || vv.userId,
+            jobId:          sd.job_id          || vv.jobId,
             async_questions: incomingQuestions,
             interview_questions: incomingQuestions,
             expired: false,
@@ -763,6 +763,11 @@ export default function InterviewPage() {
         vapi = new Vapi(PUBLIC_KEY);
 
         vapi.on("call-start", async (callData) => {
+          console.log("[interview] vapi call-start", {
+            sessionToken,
+            callId: callData?.id || callData?.callId || null,
+            rawCallData: callData,
+          });
           hideOverlay();
           if (callInfo) callInfo.textContent = `Interview · ${variableValues.candidateName}`;
           startTimer();
@@ -772,6 +777,11 @@ export default function InterviewPage() {
           if (sessionToken) {
             const callId = callData?.id || callData?.callId || null;
             const convState = callData?.state || callData?.conversationState || resumeData?.vapi_conversation_state || null;
+            console.log("[interview] posting session-start", {
+              sessionToken,
+              callId,
+              hasConversationState: !!convState,
+            });
             fetch(`${API_BASE}/api/session-start`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -780,7 +790,18 @@ export default function InterviewPage() {
                 vapi_call_id: callId,
                 conversation_state: convState,
               }),
-            }).catch(() => {});
+            })
+              .then(async (res) => {
+                const text = await res.text().catch(() => "");
+                console.log("[interview] session-start response", {
+                  status: res.status,
+                  ok: res.ok,
+                  body: text,
+                });
+              })
+              .catch((err) => {
+                console.error("[interview] session-start request failed", err);
+              });
           }
           setTimeout(async () => {
             await setupFaceProctoring();

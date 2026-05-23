@@ -10,6 +10,6 @@ export function OPTIONS() {
 
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
-  processWebhook(body).catch(e => console.error("Webhook error:", e));
+  await processWebhook(body).catch(e => console.error("Webhook error:", e));
   return withCors(NextResponse.json({ received: true }));
 }

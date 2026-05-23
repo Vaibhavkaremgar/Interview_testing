@@ -38,7 +38,7 @@ export async function GET(request, { params }) {
     try {
       const iv = await pool.query(`SELECT status, async_completed_at FROM interviews WHERE async_token = $1 LIMIT 1`, [sessionToken]);
       const s = iv.rows?.[0]?.status || status || "";
-      if (["completed", "ended", "failed", "cancelled"].includes(String(s).toLowerCase()) || iv.rows?.[0]?.async_completed_at || ended_at) {
+      if (["completed", "ended", "failed", "cancelled", "expired", "no_show"].includes(String(s).toLowerCase()) || iv.rows?.[0]?.async_completed_at || ended_at) {
         interviewEnded = true;
       }
     } catch (err) {

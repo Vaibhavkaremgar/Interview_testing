@@ -4,6 +4,7 @@ import { finalizeSession, startRecordingConversionWorker } from "./recordingConv
 const DISCONNECT_EXPIRE_MS = 90_000;
 const HEARTBEAT_TIMEOUT_MS = 30_000;
 const WORKER_INTERVAL_MS = 10_000;
+const NO_SHOW_GRACE_MS = Number(process.env.NO_SHOW_GRACE_MS || 30 * 60 * 1000);
 
 let workerStarted = false;
 let ensurePromise = null;
@@ -74,6 +75,74 @@ async function markSilentDisconnects() {
   }
 }
 
+async function markMissedInterviewsAsNoShow() {
+  if (!DB_READY || !pool) return;
+  await ensureColumns();
+
+  const graceInterval = `${Math.max(1, Math.floor(NO_SHOW_GRACE_MS / 1000))} seconds`;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `SELECT i.async_token AS session_token, i.candidate_id
+         FROM interviews i
+         JOIN interview_sessions s ON s.session_token = i.async_token
+        WHERE LOWER(COALESCE(i.status, 'scheduled')) = 'scheduled'
+          AND i.async_completed_at IS NULL
+          AND s.started_at IS NULL
+          AND s.ended_at IS NULL
+          AND i.scheduled_at IS NOT NULL
+          AND i.scheduled_at < NOW() - ($1::INTERVAL)
+        FOR UPDATE OF i, s`,
+      [graceInterval]
+    );
+
+    if (!rows.length) {
+      await client.query("COMMIT");
+      return;
+    }
+
+    const sessionTokens = rows.map((row) => row.session_token).filter(Boolean);
+    const candidateIds = rows.map((row) => row.candidate_id).filter(Boolean);
+
+    await client.query(
+      `UPDATE interviews
+          SET status = 'no_show',
+              async_completed_at = NOW()
+        WHERE async_token = ANY($1::text[])`,
+      [sessionTokens]
+    );
+
+    await client.query(
+      `UPDATE interview_sessions
+          SET status = 'no_show',
+              connection_status = 'no_show',
+              ended_at = NOW()
+        WHERE session_token = ANY($1::text[])`,
+      [sessionTokens]
+    );
+
+    if (candidateIds.length) {
+      await client.query(
+        `UPDATE candidates
+            SET stage = 'NO_SHOW',
+                stage_updated_at = NOW()
+          WHERE id = ANY($1::uuid[])`,
+        [candidateIds]
+      );
+    }
+
+    await client.query("COMMIT");
+    console.log("[session] no-show marked", { count: sessionTokens.length });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[session] no-show sweep failed:", e.message);
+  } finally {
+    client.release();
+  }
+}
+
 function startSessionWorker() {
   if (!DB_READY || !pool) return;
   if (workerStarted) return;
@@ -83,6 +152,7 @@ function startSessionWorker() {
   setInterval(() => {
     markSilentDisconnects();
     expireDisconnectedSessions();
+    markMissedInterviewsAsNoShow();
   }, WORKER_INTERVAL_MS).unref?.();
 }
 

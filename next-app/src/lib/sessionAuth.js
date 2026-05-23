@@ -1,6 +1,6 @@
 import { pool, DB_READY } from "./db.js";
 
-const ENDED_STATUSES = new Set(["completed", "ended", "failed", "cancelled", "expired"]);
+const ENDED_STATUSES = new Set(["completed", "ended", "failed", "cancelled", "expired", "no_show"]);
 
 function isEndedStatus(status) {
   return ENDED_STATUSES.has((status || "").toString().trim().toLowerCase());

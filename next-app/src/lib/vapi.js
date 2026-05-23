@@ -222,9 +222,8 @@ function buildInsufficientDataEvaluation(transcriptWordCount = 0) {
   };
 }
 
-async function evaluateCandidate(session, transcript) {
-  const transcriptWordCount = (transcript || "").trim().split(/\s+/).filter(Boolean).length;
-  const userTranscript = (transcript || "")
+function countUserTranscriptWords(transcript = "") {
+  return (transcript || "")
     .split("\n")
     .filter(line => line.trim().toUpperCase().startsWith("USER:"))
     .map(line => line.replace(/^USER:\s*/i, ""))
@@ -232,6 +231,31 @@ async function evaluateCandidate(session, transcript) {
     .trim()
     .split(/\s+/)
     .filter(Boolean).length;
+}
+
+function deriveInterviewOutcome(transcript = "", evaluation = {}) {
+  const userTranscriptWordCount = countUserTranscriptWords(transcript);
+  if (userTranscriptWordCount === 0) {
+    return {
+      interviewStatus: "no_show",
+      candidateStage: "NO_SHOW",
+    };
+  }
+
+  return {
+    interviewStatus: "completed",
+    candidateStage:
+      evaluation.decision === "PASS"
+        ? "INTERVIEW_PASSED"
+        : evaluation.decision === "FAIL"
+          ? "INTERVIEW_FAILED"
+          : "INTERVIEW_REVIEW",
+  };
+}
+
+async function evaluateCandidate(session, transcript) {
+  const transcriptWordCount = (transcript || "").trim().split(/\s+/).filter(Boolean).length;
+  const userTranscript = countUserTranscriptWords(transcript);
 
   if (userTranscript === 0) return buildInsufficientDataEvaluation(0);
   if (transcriptWordCount < 20) {
@@ -260,6 +284,8 @@ async function saveEvaluation(session, evaluation, transcript, recordingUrl = nu
 
   const client = await pool.connect();
   try {
+    const outcome = deriveInterviewOutcome(transcript, evaluation);
+
     await client.query(
       `UPDATE interviews SET
          transcript          = $1,
@@ -270,9 +296,9 @@ async function saveEvaluation(session, evaluation, transcript, recordingUrl = nu
          culture_fit_score   = $6,
          feedback            = $7,
          video_url           = $8,
-         status              = 'completed',
+         status              = $9,
          async_completed_at  = NOW()
-       WHERE async_token = $9`,
+       WHERE async_token = $10`,
       [
         transcript,
         evaluation.summary || "",
@@ -282,6 +308,7 @@ async function saveEvaluation(session, evaluation, transcript, recordingUrl = nu
         evaluation.confidence || 0,
         JSON.stringify({ strengths: evaluation.strengths, weaknesses: evaluation.weaknesses, decision: evaluation.decision }),
         recordingUrl,
+        outcome.interviewStatus,
         session.asyncToken,
       ]
     );
@@ -303,7 +330,7 @@ async function saveEvaluation(session, evaluation, transcript, recordingUrl = nu
           evaluation.technical_depth || 0,
           evaluation.communication || 0,
           evaluation.confidence || 0,
-          evaluation.decision === "PASS" ? "INTERVIEW_PASSED" : evaluation.decision === "FAIL" ? "INTERVIEW_FAILED" : "INTERVIEW_REVIEW",
+          outcome.candidateStage,
           session.email,
         ]
       );
@@ -370,11 +397,22 @@ async function processWebhook(body) {
   try {
     const messageType = body?.message?.type || body?.type;
     const callId = body?.message?.call?.id || body?.call?.id || "";
+    const explicitToken = extractExplicitToken(body);
+    console.log("[vapi] webhook received", {
+      messageType,
+      callId,
+      explicitToken,
+    });
     const token = await resolveToken(body, callId);
     if (!token) {
-      console.warn("Ignoring webhook event without a valid session token", { messageType, callId });
+      console.warn("Ignoring webhook event without a valid session token", {
+        messageType,
+        callId,
+        explicitToken,
+      });
       return;
     }
+    console.log("[vapi] webhook token resolved", { messageType, callId, token });
     if (callId) attachCallToToken(callId, token);
     const session = getSessionByToken(token);
     if (!session) return;
@@ -428,8 +466,15 @@ async function processWebhook(body) {
         body?.message?.call?.metadata?.sessionToken ||
         session.asyncToken ||
         "";
+      console.log("[vapi] end-of-call-report", {
+        callId,
+        token,
+        asyncToken,
+        transcriptMessages: vapiMessages.length,
+      });
       if (asyncToken) {
         const asyncTokenValid = await validateTokenCached(asyncToken);
+        console.log("[vapi] async token validation", { asyncToken, asyncTokenValid });
         if (asyncTokenValid) {
           session.asyncToken = asyncToken;
           if (callId) attachCallToToken(callId, asyncToken);
@@ -464,7 +509,13 @@ async function processWebhook(body) {
 
       session.pendingEnd = true;
       session.recordingUrl = recordingUrl || session.recordingUrl;
-      scheduleFinalize(token, session);
+      console.log("[vapi] finalizing session", {
+        token,
+        asyncToken: session.asyncToken || token,
+        hasRecordingUrl: !!session.recordingUrl,
+        transcriptLength: session.finalTranscript.length,
+      });
+      await finalizeSession(session.asyncToken || token);
     }
   } catch (e) {
     console.error("Webhook processing failed:", e.message, e.stack);

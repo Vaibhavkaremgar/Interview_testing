@@ -92,7 +92,7 @@ export async function GET(request, { params }) {
       const status = interview.rows?.[0]?.status || d.status || "";
       const asyncCompletedAt = interview.rows?.[0]?.async_completed_at || null;
       const sessionEnded = d.ended_at;
-      if (["completed", "ended", "failed", "cancelled"].includes(String(status).toLowerCase()) || asyncCompletedAt || sessionEnded) {
+      if (["completed", "ended", "failed", "cancelled", "expired", "no_show"].includes(String(status).toLowerCase()) || asyncCompletedAt || sessionEnded) {
         expired = true;
       }
     } catch (e) {

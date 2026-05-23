@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { pool, DB_READY } from "@/lib/db.js";
 import { buildInterviewLink, localDateStr, parseSlotStart, sendConfirmationEmail } from "@/lib/slots.js";
 import { corsHeaders, withCors } from "@/lib/cors.js";
+import { ensureColumns, startSessionWorker } from "@/lib/sessionWorker.js";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,9 @@ export function OPTIONS() {
 }
 
 export async function POST(request) {
+  startSessionWorker();
+  await ensureColumns();
+
   const body = await request.json().catch(() => ({}));
   const {
     slot_id, email, name, bookingToken,
@@ -47,26 +51,15 @@ export async function POST(request) {
       slotDate = localDateStr(new Date(slot.slot_date));
       slotTime = slot.slot_time.slice(0, 5);
 
-      const candidateUUID = uuidv4();
-      const finalCandidateId = candidateId || uuidv4().slice(0, 8);
-      const { rows: candRows } = await client.query(
-        `INSERT INTO candidates (id, candidate_id, name, email, resume_text, agency_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (candidate_id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email, resume_text = EXCLUDED.resume_text
-         RETURNING id`,
-        [candidateUUID, finalCandidateId, name, email, resume, agencyId || null]
-      );
-      const actualCandidateId = candRows[0].id;
-
-      await client.query(
-        `UPDATE interview_slots SET current_bookings = current_bookings + 1 WHERE id = $1`,
-        [slot_id]
-      );
-
       let finalResume = resume;
       let finalJD = jobDescription;
       let finalJobRole = jobRole;
+      let resolvedAgencyId = agencyId || "";
+      let resolvedUserId = userId || "";
+      let resolvedJobId = jobId || "";
+      let resolvedCandidateRef = candidateId || "";
       const finalQuestions = interviewQuestions || async_questions || asyncQuestions || [];
+      const isUUID = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
       if ((!finalResume || !finalJD || !finalJobRole) && bookingToken) {
         try {
@@ -87,6 +80,10 @@ export async function POST(request) {
               }
               return fallback;
             };
+            resolvedAgencyId = resolvedAgencyId || pick(payload, ["agency_id", "agencyId"], tokRows[0].agency_id || "");
+            resolvedCandidateRef = resolvedCandidateRef || pick(payload, ["candidate_id", "candidateId"], tokRows[0].candidate_id || "");
+            resolvedJobId = resolvedJobId || pick(payload, ["job_id", "jobId"], tokRows[0].job_id || "");
+            resolvedUserId = resolvedUserId || pick(payload, ["user_id", "userId"], tokRows[0].user_id || "");
             finalResume = finalResume || pick(payload, ["resume_text", "resume", "resumeText"]);
             finalJD = finalJD || pick(payload, ["job_description", "jobDescription", "jd_text", "jd"]);
             finalJobRole = finalJobRole || pick(payload, ["job_title", "job_role", "jobRole", "role", "title"]);
@@ -112,7 +109,49 @@ export async function POST(request) {
         }
       }
 
-      const isUUID = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+      let actualCandidateId = "";
+      if (resolvedCandidateRef && isUUID(resolvedCandidateRef)) {
+        const { rows: existingCandidateRows } = await client.query(
+          `UPDATE candidates
+              SET name = $2,
+                  email = $3,
+                  resume_text = $4,
+                  agency_id = COALESCE($5, agency_id)
+            WHERE id = $1
+            RETURNING id`,
+          [resolvedCandidateRef, name, email, resume, isUUID(resolvedAgencyId) ? resolvedAgencyId : null]
+        );
+
+        if (existingCandidateRows.length) {
+          actualCandidateId = existingCandidateRows[0].id;
+        }
+      }
+
+      if (!actualCandidateId) {
+        const candidateUUID = uuidv4();
+        const finalCandidateId =
+          resolvedCandidateRef && !isUUID(resolvedCandidateRef)
+            ? resolvedCandidateRef
+            : uuidv4().slice(0, 8);
+        const { rows: candRows } = await client.query(
+          `INSERT INTO candidates (id, candidate_id, name, email, resume_text, agency_id)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (candidate_id) DO UPDATE
+             SET name = EXCLUDED.name,
+                 email = EXCLUDED.email,
+                 resume_text = EXCLUDED.resume_text,
+                 agency_id = COALESCE(EXCLUDED.agency_id, candidates.agency_id)
+           RETURNING id`,
+          [candidateUUID, finalCandidateId, name, email, resume, isUUID(resolvedAgencyId) ? resolvedAgencyId : null]
+        );
+        actualCandidateId = candRows[0].id;
+      }
+
+      await client.query(
+        `UPDATE interview_slots SET current_bookings = current_bookings + 1 WHERE id = $1`,
+        [slot_id]
+      );
+
       const normalizedAsyncQuestions = Array.isArray(async_questions)
         ? async_questions
         : Array.isArray(asyncQuestions)
@@ -126,10 +165,10 @@ export async function POST(request) {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'scheduled')
          RETURNING id, session_token`,
         [
-          isUUID(agencyId) ? agencyId : null,
-          isUUID(jobId) ? jobId : null,
+          isUUID(resolvedAgencyId) ? resolvedAgencyId : null,
+          isUUID(resolvedJobId) ? resolvedJobId : null,
           actualCandidateId,
-          isUUID(userId) ? userId : null,
+          isUUID(resolvedUserId) ? resolvedUserId : null,
           slot_id,
           name,
           email,
@@ -149,7 +188,7 @@ export async function POST(request) {
         `INSERT INTO interviews (candidate_id, agency_id, scheduled_at, status, async_token, async_link)
          VALUES ($1, $2, $3, 'scheduled', $4, $5)
          ON CONFLICT (async_token) DO NOTHING`,
-        [actualCandidateId, isUUID(agencyId) ? agencyId : null, scheduledAt, sessionToken, interviewLink]
+        [actualCandidateId, isUUID(resolvedAgencyId) ? resolvedAgencyId : null, scheduledAt, sessionToken, interviewLink]
       );
 
       await client.query("COMMIT");
